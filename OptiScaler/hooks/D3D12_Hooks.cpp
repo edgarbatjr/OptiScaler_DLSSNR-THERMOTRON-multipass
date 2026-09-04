@@ -165,6 +165,10 @@ static RootRestoreHook<PFN_SetPipelineState> s_SetPipelineState {};
 // Those use a common rootSignatureMutex mutex
 static std::shared_mutex rootSignatureMutex;
 static ankerl::unordered_dense::map<ID3D12GraphicsCommandList*, SignatureEntry> signatures;
+// Onimusha fix: the compute signature is tracked in its own slot. `signatures` only keeps the LAST
+// signature of either type, so a game that binds its graphics signature after its compute one (RE Engine
+// in Onimusha: Way of the Sword) never got its compute signature restored after the pass -> device removed.
+static ankerl::unordered_dense::map<ID3D12GraphicsCommandList*, ID3D12RootSignature*> computeSignatures;
 static RootRestoreHook<PFN_SetGraphicsRootSignature> s_SetGraphicsRootSignature {};
 static RootRestoreHook<PFN_SetComputeRootSignature> s_SetComputeRootSignature {};
 
@@ -431,6 +435,7 @@ static void hkSetComputeRootSignature(ID3D12GraphicsCommandList* commandList, ID
 
         std::unique_lock<std::shared_mutex> lock(rootSignatureMutex);
         signatures.insert_or_assign(commandList, SignatureEntry { SignatureEntryType::Compute, pRootSignature });
+        computeSignatures.insert_or_assign(commandList, pRootSignature);
     }
 
     s_SetComputeRootSignature.o_earlyHook(commandList, pRootSignature);
@@ -739,6 +744,7 @@ static void hkSetComputeRootSignatureLate(ID3D12GraphicsCommandList* commandList
 
         std::unique_lock<std::shared_mutex> lock(rootSignatureMutex);
         signatures.insert_or_assign(commandList, SignatureEntry { SignatureEntryType::Compute, pRootSignature });
+        computeSignatures.insert_or_assign(commandList, pRootSignature);
     }
 
     s_SetComputeRootSignature.o_lateHook(commandList, pRootSignature);
@@ -2388,7 +2394,7 @@ void D3D12Hooks::SetRootSignatureTracking(bool enable) { isUpscalerActive = !ena
 bool D3D12Hooks::CanRestoreRootSignature(ID3D12GraphicsCommandList* cmdList)
 {
     std::unique_lock<std::shared_mutex> lock(rootSignatureMutex);
-    return signatures.contains(cmdList);
+    return signatures.contains(cmdList) || computeSignatures.contains(cmdList);
 }
 
 bool D3D12Hooks::RestoreDescriptorHeaps(ID3D12GraphicsCommandList* cmdList)
@@ -2642,6 +2648,37 @@ void D3D12Hooks::RestoreRoot(ID3D12GraphicsCommandList* cmdList)
         else
         {
             LOG_TRACE("Can't restore Root Signature for CmdList: {:X}", (UINT64) cmdList);
+        }
+
+        // Onimusha fix: the pass only ever binds COMPUTE state. If the last signature the game bound on this
+        // list was a graphics one, the block above restored graphics and left the pass's compute signature (and
+        // root params) bound. Put the game's compute signature back too.
+        const bool lastWasCompute =
+            signatures.contains(cmdList) && signatures[cmdList].type == SignatureEntryType::Compute;
+
+        if (restoreComputeSignature && !lastWasCompute && computeSignatures.contains(cmdList))
+        {
+            auto computeSig = computeSignatures[cmdList];
+            const bool extendedRestoreSignature = Config::Instance()->ExtendedStateRestore.value_or_default();
+
+            if (auto hook = s_SetComputeRootSignature.GetHook())
+            {
+                LOG_TRACE("Restore (separate slot) ComputeRootSig: {:X}, for CmdList: {:X}", (UINT64) computeSig,
+                          (UINT64) cmdList);
+                hook(cmdList, computeSig);
+
+                if (extendedRestoreSignature)
+                {
+                    if (RestoreComputeRootState(cmdList))
+                        LOG_TRACE("Restored ComputeRootState (separate slot) for CmdList: {:X}", (UINT64) cmdList);
+                    else
+                        LOG_WARN("Can't restore ComputeRootState (separate slot) for CmdList: {:X}", (UINT64) cmdList);
+                }
+            }
+            else
+            {
+                LOG_ERROR("Couldn't restore Compute RootSignature (separate slot), no original SetComputeRootSignature");
+            }
         }
     }
 }
