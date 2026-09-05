@@ -1149,7 +1149,22 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     {
         const float2 lp = gLowFreq.SampleLevel(gLinear, cmpUv, 0).rg;
         const float k = clamp((lp.y + 1e-4) / (lp.x + 1e-4), 1.0 / 3.0, 3.0);
-        result *= lerp(1.0, 1.0 / k, saturate(gEdgeGuard));
+
+        // Never past the original. The block mean is coarser than the glow, so on the glow's outer
+        // slope -- where a pixel's own lift is smaller than its block's -- dividing by the block's
+        // ratio would push the pixel below the frame's brightness: a dark ring in place of the
+        // bright one. Undoing a lift may bring a pixel down to the original's luminance and no
+        // further; undoing a darkening may bring it up to the original and no further. What the
+        // model did on the other side of the original is not this guard's business.
+        const float rl = dot(result, kLuma);
+        float target = rl / k;
+
+        if (k > 1.0)
+            target = max(target, min(rl, originalLuma));
+        else
+            target = min(target, max(rl, originalLuma));
+
+        result *= lerp(1.0, (target + 1e-6) / (rl + 1e-6), saturate(gEdgeGuard));
     }
 
     if (gEdgeGuardMode != 0 && gEdgeGuardMode != 4)
