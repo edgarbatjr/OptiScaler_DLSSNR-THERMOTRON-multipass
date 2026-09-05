@@ -374,6 +374,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrPassDecay2.set_from_config(readFloat("DlssNr", "PassDecay2"));
             DlssNrPassDecay3.set_from_config(readFloat("DlssNr", "PassDecay3"));
             DlssNrPassDecay4.set_from_config(readFloat("DlssNr", "PassDecay4"));
+            DlssNrLaterPassScale.set_from_config(readFloat("DlssNr", "LaterPassScale"));
             DlssNrApplyModel.set_from_config(readBool("DlssNr", "ApplyModel"));
             DlssNrHoldFrame.set_from_config(readBool("DlssNr", "HoldFrame"));
             UseGenericAppIdWithDlss.set_from_config(readBool("DLSS", "UseGenericAppIdWithDlss"));
@@ -1273,6 +1274,7 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "PassDecay2", GetFloatValue(Instance()->DlssNrPassDecay2.value_for_config()).c_str());
     ini.SetValue("DlssNr", "PassDecay3", GetFloatValue(Instance()->DlssNrPassDecay3.value_for_config()).c_str());
     ini.SetValue("DlssNr", "PassDecay4", GetFloatValue(Instance()->DlssNrPassDecay4.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "LaterPassScale", GetFloatValue(Instance()->DlssNrLaterPassScale.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ApplyModel", GetBoolValue(Instance()->DlssNrApplyModel.value_for_config()).c_str());
     ini.SetValue("DlssNr", "HoldFrame", GetBoolValue(Instance()->DlssNrHoldFrame.value_for_config()).c_str());
         ini.SetValue("DLSS", "RenderPresetOverride",

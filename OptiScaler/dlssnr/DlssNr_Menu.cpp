@@ -261,6 +261,33 @@ void RenderMenu(Config* config, float menuResScale)
                     config->DlssNrPassDecay3 = 1.0f;
                     config->DlssNrPassDecay4 = 1.0f;
                 }
+
+                // Mixed resolution: the later passes at a fraction of the working size. Committed on
+                // release, because each distinct value rebuilds the later passes' features.
+                static int pendingLater = -1;
+                int laterPercent = pendingLater >= 0
+                                       ? pendingLater
+                                       : (int) lroundf(config->DlssNrLaterPassScale.value_or_default() * 100.0f);
+
+                if (ImGui::SliderInt("Later passes resolution", &laterPercent, 25, 100,
+                                     laterPercent >= 100 ? "%d%% (same as pass 1)" : "%d%%"))
+                    pendingLater = laterPercent;
+
+                if (ImGui::IsItemDeactivatedAfterEdit() && pendingLater >= 0)
+                {
+                    config->DlssNrLaterPassScale = std::clamp(pendingLater, 25, 100) / 100.0f;
+                    pendingLater = -1;
+                }
+
+                HelpMarker("Mixed-resolution passes. Pass 1 runs at the working size (Model"
+                               "\nresolution above); passes 2-4 run at this fraction of it, and what"
+                               "\nthey add comes back as a residual laid over pass 1's full-size"
+                               "\nanswer. So the fine texture of pass 1 is kept whole, the later"
+                               "\npasses -- which mostly compound the silhouette glow -- run"
+                               "\nsmaller, softer and cheaper. 70% is a good start: about half the"
+                               "\ncost of the later passes, and the glow they add is blurred by the"
+                               "\nenlargement. 100% is the old behaviour. Ignored while Model"
+                               "\nresolution is below 100% (that reduction wins).");
             }
         }
 

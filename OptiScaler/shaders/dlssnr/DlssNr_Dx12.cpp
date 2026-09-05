@@ -236,6 +236,18 @@ struct NrState
     // between-pass lock can match each pass's answer to the frame the model was first shown.
     ID3D12Resource* proxyKeep = nullptr;
 
+    // Mixed-resolution passes. The first pass runs at the working size into `output`; the later
+    // passes run at a fraction of it: mixBase is pass 1's answer shrunk (what pass 2 is shown),
+    // mixIn/mixOut the small ping-pong, mixFull the composed full-size answer the resolve reads.
+    ID3D12Resource* mixBase = nullptr;
+    ID3D12Resource* mixIn = nullptr;
+    ID3D12Resource* mixOut = nullptr;
+    ID3D12Resource* mixFull = nullptr;
+    unsigned int mixWidth = 0;
+    unsigned int mixHeight = 0;
+    // The later-pass scale the pass features were built for (1 = the working size).
+    float builtLaterScale = 1.0f;
+
     // Supersampling (working scale > 1): the Output Scaling upsampler used to enlarge the proxy to the
     // model's larger-than-native working size with a real filter instead of the box minifier. Created
     // lazily on the first super-native frame, released in Shutdown; sizes from the resources each call,
@@ -751,7 +763,8 @@ void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed)
         ParkNrFeature(f);
 
     for (ID3D12Resource** r :
-         { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall, &g_nr.lowFreq, &g_nr.proxyKeep })
+         { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall, &g_nr.lowFreq, &g_nr.proxyKeep,
+           &g_nr.mixBase, &g_nr.mixIn, &g_nr.mixOut, &g_nr.mixFull })
         ParkNrResource(*r);
 
     g_nr.reset = true;
@@ -1796,7 +1809,41 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             ParkNrResource(g_nr.outputNative);
             ParkNrResource(g_nr.lowFreq);
             ParkNrResource(g_nr.proxyKeep);
+            ParkNrResource(g_nr.mixBase);
+            ParkNrResource(g_nr.mixIn);
+            ParkNrResource(g_nr.mixOut);
+            ParkNrResource(g_nr.mixFull);
         }
+    }
+
+    // Mixed-resolution passes: on when there is more than one pass, the later-pass scale is below 1,
+    // and the model is not already working below (or above) the frame -- the two reductions are not
+    // combined, so a reduced working size simply wins and the later passes follow it.
+    float laterScale = cfg.DlssNrLaterPassScale.value_or_default();
+    laterScale = laterScale < 0.25f ? 0.25f : (laterScale > 1.0f ? 1.0f : laterScale);
+    const bool mixed = !reduced && laterScale < 0.999f &&
+                       std::clamp(cfg.DlssNrPasses.value_or_default(), 1u, kNrMaxPasses) > 1;
+    const unsigned int mixWidth = mixed ? (unsigned int) (workWidth * laterScale + 0.5f) : workWidth;
+    const unsigned int mixHeight = mixed ? (unsigned int) (workHeight * laterScale + 0.5f) : workHeight;
+    const float builtScaleNow = mixed ? laterScale : 1.0f;
+
+    if (g_nr.builtLaterScale != builtScaleNow || g_nr.mixWidth != mixWidth || g_nr.mixHeight != mixHeight)
+    {
+        // The later passes' features were built for another raster: park them (they rebuild at the
+        // new size on the next frame, frame-ahead rule as usual) and the small surfaces with them.
+        for (unsigned int i = 1; i <= kNrMaxPasses; ++i)
+            ParkNrFeature(g_nr.passFeature[i]);
+
+        ParkNrResource(g_nr.mixBase);
+        ParkNrResource(g_nr.mixIn);
+        ParkNrResource(g_nr.mixOut);
+        ParkNrResource(g_nr.mixFull);
+
+        g_nr.builtLaterScale = builtScaleNow;
+        g_nr.mixWidth = mixWidth;
+        g_nr.mixHeight = mixHeight;
+        LOG_INFO("DLSS-NR mixed passes: {} (later passes at {}x{}, first at {}x{})",
+                 mixed ? "on" : "off", mixWidth, mixHeight, workWidth, workHeight);
     }
 
     if (g_nr.output == nullptr)
@@ -1813,6 +1860,14 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     if (g_nr.proxyKeep == nullptr)
         g_nr.proxyKeep = CreateScratch(device, desc.Format, workWidth, workHeight);
+
+    if (mixed && g_nr.mixBase == nullptr)
+    {
+        g_nr.mixBase = CreateScratch(device, desc.Format, mixWidth, mixHeight);
+        g_nr.mixIn = CreateScratch(device, desc.Format, mixWidth, mixHeight);
+        g_nr.mixOut = CreateScratch(device, desc.Format, mixWidth, mixHeight);
+        g_nr.mixFull = CreateScratch(device, desc.Format, workWidth, workHeight);
+    }
 
     if (g_nr.lowFreq == nullptr)
     {
@@ -2321,7 +2376,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 {
                     g_nr.passFeature[i] = g_nr.create(
                         snip->wstring().c_str(), State::Instance().NVNGX_ApplicationDataPath.c_str(),
-                        device, cmdList, g_nr.capabilityParams, workWidth, workHeight,
+                        device, cmdList, g_nr.capabilityParams, mixed ? mixWidth : workWidth,
+                        mixed ? mixHeight : workHeight,
                         (int) cfg.DlssNrPreset.value_or_default(), cfg.DlssNrIntensity.value_or_default(),
                         (int) cfg.DlssNrStyle.value_or_default(),
                         cfg.DlssNrLocalStructure.value_or_default(),
@@ -2385,7 +2441,13 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // The between-pass lock: on, and possible. It needs the first pass's input kept aside (same
     // shape as the model input -- proxyKeep is allocated at working size, which is what modelInput
     // is whenever there is more than one pass), the low-frequency map, and a detail-only mode.
-    const bool lockBetween = passes > 1 && cfg.DlssNrEdgeGuardMode.value_or_default() >= 4 &&
+    const bool mixedRun = mixed && passes > 1 && g_nr.mixBase != nullptr && g_nr.mixIn != nullptr &&
+                          g_nr.mixOut != nullptr && g_nr.mixFull != nullptr && modelInput != nullptr;
+    bool mixRan = false;      // a later pass actually ran at the small size this frame
+    bool mixInUsed = false;   // mixIn was written (pass 3 or 4 ran)
+    bool mixShrunk = false;   // pass 1's answer was shrunk into mixBase (output/mixBase are SRVs)
+
+    const bool lockBetween = !mixedRun && passes > 1 && cfg.DlssNrEdgeGuardMode.value_or_default() >= 4 &&
                              cfg.DlssNrEdgeBetweenPasses.value_or_default() && g_nr.proxyKeep != nullptr &&
                              g_nr.lowFreq != nullptr && modelInput != nullptr &&
                              modelInput->GetDesc().Width == g_nr.proxyKeep->GetDesc().Width &&
@@ -2415,7 +2477,42 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         if (pass > 0 && (g_nr.passFeature[pass] == nullptr || g_nr.passFeatureFresh[pass]))
             continue;
 
-        if (pass > 0 && lockBetween)
+        if (pass > 0 && mixedRun)
+        {
+            if (!mixRan)
+            {
+                // First small pass: shrink pass 1's full-size answer into mixBase and show it that.
+                Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+                DlssNrConstants down {};
+                down.Mode = DlssNrMode_Downsample;
+                down.Width = mixWidth;
+                down.Height = mixHeight;
+                DispatchPass(cmdList, down, g_nr.output, nullptr, nullptr, nullptr, nullptr, g_nr.mixBase,
+                             nullptr);
+                Barrier(cmdList, g_nr.mixBase, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                mixShrunk = true;
+            }
+            else
+            {
+                // Later small passes: the last small answer becomes the input, same size, plain copy.
+                Barrier(cmdList, g_nr.mixOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE);
+                Barrier(cmdList, g_nr.mixIn,
+                        mixInUsed ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                                  : D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_COPY_DEST);
+                cmdList->CopyResource(g_nr.mixIn, g_nr.mixOut);
+                Barrier(cmdList, g_nr.mixIn, D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                Barrier(cmdList, g_nr.mixOut, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                mixInUsed = true;
+            }
+        }
+        else if (pass > 0 && lockBetween)
         {
             // The previous pass's answer becomes this pass's input WITH its low-frequency luminance
             // put back where the first pass's input had it. Each pass then paints on a frame that
@@ -2500,14 +2597,62 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         const float skinIn = cfg.DlssNrSkinStructure.value_or_default();
         const float passSkin = skinIn < 0.0f ? skinIn : skinIn * passScale;
 
+        // Mixed: the later passes read and write the small pair, with the vectors scaled to it.
+        const bool smallPass = pass > 0 && mixedRun;
+        ID3D12Resource* passIn = smallPass ? (mixRan ? g_nr.mixIn : g_nr.mixBase) : modelInput;
+        ID3D12Resource* passOut = smallPass ? g_nr.mixOut : g_nr.output;
+        const unsigned int passW = smallPass ? mixWidth : workWidth;
+        const unsigned int passH = smallPass ? mixHeight : workHeight;
+        const float mvToPass = smallPass && width != 0 ? (float) mixWidth / (float) width : mvToWork;
+
         result = g_nr.evaluate(
-            cmdList, passUses, g_nr.capabilityParams, modelInput, depthIn, motionIn, g_nr.output,
-            workWidth, workHeight, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0,
+            cmdList, passUses, g_nr.capabilityParams, passIn, depthIn, motionIn, passOut,
+            passW, passH, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0,
             passReset, passIntensity,
             (int) cfg.DlssNrStyle.value_or_default(), passStructure,
             passTone, passSkin,
-            cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToWork,
-            g_nr.guideMvScaleY * mvToWork);
+            cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToPass,
+            g_nr.guideMvScaleY * mvToPass);
+
+        if (smallPass && result == 1)
+            mixRan = true;
+    }
+
+    // Mixed: compose the later passes' residual over pass 1's full-size answer into mixFull, which
+    // is what the resolve then reads as the model's answer. Everything is put back in its resting
+    // state afterwards (output UAV, so the resolve's own barrier below still holds).
+    if (mixRan)
+    {
+        Barrier(cmdList, g_nr.mixOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        DlssNrConstants mixParams {};
+        mixParams.Mode = DlssNrMode_MixedCompose;
+        mixParams.Width = workWidth;
+        mixParams.Height = workHeight;
+        mixParams.Passthrough = isHdrBuffer ? 0u : 1u;
+        mixParams.EdgeGuard = 1.0f;
+        DispatchPass(cmdList, mixParams, g_nr.output, g_nr.mixOut, g_nr.mixBase, nullptr, nullptr,
+                     g_nr.mixFull, nullptr);
+
+        Barrier(cmdList, g_nr.mixOut, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, g_nr.mixBase, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if (mixInUsed)
+            Barrier(cmdList, g_nr.mixIn, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
+    else if (mixShrunk)
+    {
+        // Shrunk, then the small pass failed to evaluate: put the two back in their resting state so
+        // the failure path below (and the next frame) find them where they expect.
+        Barrier(cmdList, g_nr.mixBase, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
 
     if (lockBetween)
@@ -2685,7 +2830,11 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         }
 
         ID3D12Resource* resolveProxy = superDownOk ? g_nr.colorCopy : modelInput;
-        ID3D12Resource* resolveAnswer = superDownOk ? g_nr.outputNative : g_nr.output;
+        ID3D12Resource* resolveAnswer = superDownOk ? g_nr.outputNative : (mixRan ? g_nr.mixFull : g_nr.output);
+
+        if (mixRan)
+            Barrier(cmdList, g_nr.mixFull, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
         // The detail-only modes need the low-frequency luminance of both pictures first: one small
         // dispatch that box-averages 16x16 blocks of the proxy and of the answer into a two-channel
@@ -2717,6 +2866,10 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
         if (superDownOk)
             Barrier(cmdList, g_nr.outputNative, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+        if (mixRan)
+            Barrier(cmdList, g_nr.mixFull, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
         // On-demand capture works in this path too: the staging copy still holds the frame as the
@@ -3256,6 +3409,15 @@ void Shutdown()
     {
         g_nr.proxyKeep->Release();
         g_nr.proxyKeep = nullptr;
+    }
+
+    for (ID3D12Resource** r : { &g_nr.mixBase, &g_nr.mixIn, &g_nr.mixOut, &g_nr.mixFull })
+    {
+        if (*r != nullptr)
+        {
+            (*r)->Release();
+            *r = nullptr;
+        }
     }
 
     if (g_nr.superUp != nullptr)

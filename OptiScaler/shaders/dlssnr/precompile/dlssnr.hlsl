@@ -756,6 +756,25 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     }
 #endif
 
+    // Mixed-resolution compose. gSource is the first pass's answer at full size, gModel the last
+    // small pass's answer, gOriginal the small picture the second pass was shown (the first pass's
+    // answer shrunk). What the later passes added is the difference of the two small pictures,
+    // enlarged and laid over the full-size first pass -- so pass 1's fine texture is kept whole and
+    // only the later passes' contribution comes up from the reduced raster. In the proxy's encoded
+    // space, like the model's own edit. gEdgeGuard carries how much of the residual is applied.
+#ifndef VK_MODE
+    if (gMode == 8)
+    {
+        const float4 p1 = gSource.Load(int3(id.xy, 0));
+        const float3 so = gModel.SampleLevel(gLinear, uv, 0).rgb;
+        const float3 sb = gOriginal.SampleLevel(gLinear, uv, 0).rgb;
+        float3 r = p1.rgb + (so - sb) * saturate(gEdgeGuard);
+        r = gPassthrough != 0 ? max(r, 0.0) : saturate(r);
+        gTarget[id.xy] = float4(r, p1.a);
+        return;
+    }
+#endif
+
     if (gMode == 2)
     {
         uint srcW, srcH;
