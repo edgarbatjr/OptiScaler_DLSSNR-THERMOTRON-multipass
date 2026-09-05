@@ -292,6 +292,9 @@ class Config
     CustomOptional<float> DlssNrEdgeThreshold { 0.10f };
     // How far the band reaches from the silhouette, in output pixels.
     CustomOptional<float> DlssNrEdgeRadius { 10.0f };
+    // Detail-only modes: also lock the low-frequency luminance BETWEEN passes, so pass N+1 is shown a
+    // frame without pass N's glow and the halo does not compound with the pass count.
+    CustomOptional<bool> DlssNrEdgeBetweenPasses { true };
 
     // Whether the model's edit is applied. Off keeps the pass running (so Hold frame works) but shows
     // the clean upscaler frame -- for A/B'ing NR on/off on a frozen frame. Default true.

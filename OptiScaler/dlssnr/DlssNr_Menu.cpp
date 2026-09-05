@@ -415,6 +415,18 @@ void RenderMenu(Config* config, float menuResScale)
                        "\ntop, for whatever survives right at the silhouette."
                        "\n\nDebug view 'Edge guard band' shows the band. Off is byte-identical.");
 
+        if (edgeMode >= 4)
+        {
+            bool between = config->DlssNrEdgeBetweenPasses.value_or_default();
+            if (ImGui::Checkbox("Lock between passes", &between))
+                config->DlssNrEdgeBetweenPasses = between;
+
+            HelpMarker("With more than one pass, also match each pass's large-scale luminance back to"
+                           "\nthe first pass's input before the next pass runs. Each pass then paints on"
+                           "\nthe last one's detail but not its glow, so the halo does not grow with the"
+                           "\npass count. Two tiny dispatches per extra pass.");
+        }
+
         if (edgeMode != 0)
         {
             float edgeGuard = config->DlssNrEdgeGuard.value_or_default();

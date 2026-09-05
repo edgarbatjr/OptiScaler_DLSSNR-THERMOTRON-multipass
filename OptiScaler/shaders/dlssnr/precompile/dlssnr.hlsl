@@ -723,6 +723,39 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     }
 #endif
 
+    // The between-pass lock. gSource is the pass that just ran, gOriginal the first pass's input,
+    // gLowFreq the map of the two (R the input's block mean, G the answer's). The answer is handed
+    // to the next pass with its large-scale luminance put back where the input had it -- never
+    // past it, the same rule as the resolve's -- so the next pass paints on detail, not on glow.
+    // Works in the proxy's own encoded space, decoded and re-encoded around the arithmetic.
+#ifndef VK_MODE
+    if (gMode == 7)
+    {
+        const float4 s = gSource.Load(int3(id.xy, 0));
+        const float3 p0 = gOriginal.Load(int3(id.xy, 0)).rgb;
+
+        float3 lin = gPassthrough != 0 ? s.rgb : SrgbToLinear(s.rgb);
+        const float3 lin0 = gPassthrough != 0 ? p0 : SrgbToLinear(p0);
+
+        const float2 lp = gLowFreq.SampleLevel(gLinear, uv, 0).rg;
+        const float k = clamp((lp.y + 1e-4) / (lp.x + 1e-4), 1.0 / 3.0, 3.0);
+
+        const float rl = dot(max(lin, 0.0), kLuma);
+        const float ol = dot(max(lin0, 0.0), kLuma);
+        float target = rl / k;
+
+        if (k > 1.0)
+            target = max(target, min(rl, ol));
+        else
+            target = min(target, max(rl, ol));
+
+        lin *= lerp(1.0, (target + 1e-6) / (rl + 1e-6), saturate(gEdgeGuard));
+
+        gTarget[id.xy] = float4(gPassthrough != 0 ? lin : LinearToSrgb(lin), s.a);
+        return;
+    }
+#endif
+
     if (gMode == 2)
     {
         uint srcW, srcH;

@@ -232,6 +232,10 @@ struct NrState
     unsigned int lowFreqWidth = 0;
     unsigned int lowFreqHeight = 0;
 
+    // The first pass's input, kept aside while later passes overwrite the model input, so the
+    // between-pass lock can match each pass's answer to the frame the model was first shown.
+    ID3D12Resource* proxyKeep = nullptr;
+
     // Supersampling (working scale > 1): the Output Scaling upsampler used to enlarge the proxy to the
     // model's larger-than-native working size with a real filter instead of the box minifier. Created
     // lazily on the first super-native frame, released in Shutdown; sizes from the resources each call,
@@ -747,7 +751,7 @@ void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed)
         ParkNrFeature(f);
 
     for (ID3D12Resource** r :
-         { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall, &g_nr.lowFreq })
+         { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall, &g_nr.lowFreq, &g_nr.proxyKeep })
         ParkNrResource(*r);
 
     g_nr.reset = true;
@@ -1791,6 +1795,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             ParkNrResource(g_nr.colorSmall);
             ParkNrResource(g_nr.outputNative);
             ParkNrResource(g_nr.lowFreq);
+            ParkNrResource(g_nr.proxyKeep);
         }
     }
 
@@ -1805,6 +1810,9 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     if (reduced && g_nr.colorSmall == nullptr)
         g_nr.colorSmall = CreateScratch(device, desc.Format, workWidth, workHeight);
+
+    if (g_nr.proxyKeep == nullptr)
+        g_nr.proxyKeep = CreateScratch(device, desc.Format, workWidth, workHeight);
 
     if (g_nr.lowFreq == nullptr)
     {
@@ -2374,6 +2382,31 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     int result = 1;
 
+    // The between-pass lock: on, and possible. It needs the first pass's input kept aside (same
+    // shape as the model input -- proxyKeep is allocated at working size, which is what modelInput
+    // is whenever there is more than one pass), the low-frequency map, and a detail-only mode.
+    const bool lockBetween = passes > 1 && cfg.DlssNrEdgeGuardMode.value_or_default() >= 4 &&
+                             cfg.DlssNrEdgeBetweenPasses.value_or_default() && g_nr.proxyKeep != nullptr &&
+                             g_nr.lowFreq != nullptr && modelInput != nullptr &&
+                             modelInput->GetDesc().Width == g_nr.proxyKeep->GetDesc().Width &&
+                             modelInput->GetDesc().Height == g_nr.proxyKeep->GetDesc().Height &&
+                             modelInput->GetDesc().Format == g_nr.proxyKeep->GetDesc().Format;
+
+    if (lockBetween)
+    {
+        // proxyKeep lives in UNORDERED_ACCESS between frames (CreateScratch's state, and where the
+        // lock below leaves it). modelInput is NON_PIXEL_SHADER_RESOURCE here, the model's contract.
+        Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_COPY_SOURCE);
+        Barrier(cmdList, g_nr.proxyKeep, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_COPY_DEST);
+        cmdList->CopyResource(g_nr.proxyKeep, modelInput);
+        Barrier(cmdList, g_nr.proxyKeep, D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
     for (unsigned int pass = 0; pass < passes && result == 1; ++pass)
     {
         // Frame-ahead rule: a pass feature built on this very command list is not evaluated on it.
@@ -2382,7 +2415,46 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         if (pass > 0 && (g_nr.passFeature[pass] == nullptr || g_nr.passFeatureFresh[pass]))
             continue;
 
-        if (pass > 0)
+        if (pass > 0 && lockBetween)
+        {
+            // The previous pass's answer becomes this pass's input WITH its low-frequency luminance
+            // put back where the first pass's input had it. Each pass then paints on a frame that
+            // carries the last pass's detail but not its glow, so the glow does not compound with
+            // the pass count -- which is what made three passes worse than one along silhouettes.
+            // Two small dispatches in place of the copy: the map, then the apply.
+            Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+            DlssNrConstants lowParams {};
+            lowParams.Mode = DlssNrMode_LowFreq;
+            lowParams.Width = g_nr.lowFreqWidth;
+            lowParams.Height = g_nr.lowFreqHeight;
+            lowParams.Passthrough = isHdrBuffer ? 0u : 1u;
+            DispatchPass(cmdList, lowParams, g_nr.proxyKeep, g_nr.output, nullptr, nullptr, nullptr,
+                         g_nr.lowFreq, nullptr);
+            Barrier(cmdList, g_nr.lowFreq, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+            Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+            DlssNrConstants applyParams {};
+            applyParams.Mode = DlssNrMode_LowFreqApply;
+            applyParams.Width = workWidth;
+            applyParams.Height = workHeight;
+            applyParams.Passthrough = isHdrBuffer ? 0u : 1u;
+            applyParams.EdgeGuard = cfg.DlssNrEdgeGuard.value_or_default();
+            DispatchPass(cmdList, applyParams, g_nr.output, nullptr, g_nr.proxyKeep, nullptr, nullptr,
+                         modelInput, nullptr, nullptr, g_nr.lowFreq);
+
+            Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            Barrier(cmdList, g_nr.lowFreq, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        }
+        else if (pass > 0)
         {
             Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -2423,6 +2495,10 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToWork,
             g_nr.guideMvScaleY * mvToWork);
     }
+
+    if (lockBetween)
+        Barrier(cmdList, g_nr.proxyKeep, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     if (g_ngxTime != nullptr)
         g_ngxTime->End(cmdList);
@@ -3160,6 +3236,12 @@ void Shutdown()
     {
         g_nr.lowFreq->Release();
         g_nr.lowFreq = nullptr;
+    }
+
+    if (g_nr.proxyKeep != nullptr)
+    {
+        g_nr.proxyKeep->Release();
+        g_nr.proxyKeep = nullptr;
     }
 
     if (g_nr.superUp != nullptr)
