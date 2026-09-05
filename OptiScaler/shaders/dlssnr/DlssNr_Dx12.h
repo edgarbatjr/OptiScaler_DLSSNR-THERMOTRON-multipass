@@ -62,7 +62,9 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     // The shader reads five inputs and writes two, and not every mode uses all of them. Unused slots
     // still need a view bound -- an unbound descriptor is not an empty read, it is a read from
     // nothing -- so a stand-in is written into whichever are spare.
-    static constexpr uint32_t kSrvCount = 6;
+    static constexpr uint32_t kSrvCount = 7;
+    // t5 the game's depth (edge guard), t6 the low-frequency luminance map (detail-only modes).
+    static constexpr uint32_t kDepthSlot = 5;
     static constexpr uint32_t kUavCount = 2;
 
     uint32_t _numThreadsX = 8;
@@ -97,5 +99,7 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
                   ID3D12Resource* InPrevEdit, ID3D12Resource* OutTarget,
                   ID3D12Resource* OutKeep,
                   // The game's depth, read by the resolve's edge guard (t5). Null everywhere else.
-                  ID3D12Resource* InDepth = nullptr);
+                  ID3D12Resource* InDepth = nullptr,
+                  // The low-frequency luminance map, read by the resolve's detail-only modes (t6).
+                  ID3D12Resource* InLowFreq = nullptr);
 };

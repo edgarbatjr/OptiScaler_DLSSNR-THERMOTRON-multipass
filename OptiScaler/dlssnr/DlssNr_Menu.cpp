@@ -391,9 +391,11 @@ void RenderMenu(Config* config, float menuResScale)
 
         // The edge guard. D3D12 only: the Vulkan pass has no depth slot and ignores these.
         static const char* edgeNames[] = { "Off", "Soften (blend to frame)", "No brightening",
-                                           "Luma lock (model colour, frame light)" };
+                                           "Luma lock (model colour, frame light)",
+                                           "Detail only (low-frequency lock)",
+                                           "Detail only + no brightening band" };
         int edgeMode = (int) config->DlssNrEdgeGuardMode.value_or_default();
-        if (edgeMode < 0 || edgeMode > 3)
+        if (edgeMode < 0 || edgeMode > 5)
             edgeMode = 0;
         if (ImGui::Combo("Edge guard (halo)", &edgeMode, edgeNames, IM_ARRAYSIZE(edgeNames)))
             config->DlssNrEdgeGuardMode = (uint32_t) edgeMode;
@@ -405,6 +407,12 @@ void RenderMenu(Config* config, float menuResScale)
                        "\n\nSoften blends the result back toward the frame in the band. No brightening"
                        "\nlets the edit darken there but never lift a pixel, which is what the halo is."
                        "\nLuma lock keeps the model's colour and texture but the frame's own light."
+                       "\n\nDetail only is the wide-halo cure: the model may add detail but never change"
+                       "\nthe brightness of a region. Its large-scale brightness change (16x16 blocks,"
+                       "\nblurred) is divided back out everywhere, so a glow that spreads 50 pixels"
+                       "\nacross a wall behind a subject is undone while the texture stays. Strength"
+                       "\nis how much of it is undone. The last mode adds the no-brightening band on"
+                       "\ntop, for whatever survives right at the silhouette."
                        "\n\nDebug view 'Edge guard band' shows the band. Off is byte-identical.");
 
         if (edgeMode != 0)

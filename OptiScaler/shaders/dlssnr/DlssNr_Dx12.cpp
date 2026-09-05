@@ -225,6 +225,13 @@ struct NrState
     // The frame shrunk for the model, when it is working below full resolution.
     ID3D12Resource* colorSmall = nullptr;
 
+    // The low-frequency luminance map for the edge guard's "detail only" modes: R = the proxy's mean
+    // linear luminance, G = the model answer's, over 16x16 blocks. The model's large-scale change of
+    // brightness is the ratio of the two, and the resolve divides it back out so only the detail stays.
+    ID3D12Resource* lowFreq = nullptr;
+    unsigned int lowFreqWidth = 0;
+    unsigned int lowFreqHeight = 0;
+
     // Supersampling (working scale > 1): the Output Scaling upsampler used to enlarge the proxy to the
     // model's larger-than-native working size with a real filter instead of the box minifier. Created
     // lazily on the first super-native frame, released in Shutdown; sizes from the resources each call,
@@ -740,7 +747,7 @@ void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed)
         ParkNrFeature(f);
 
     for (ID3D12Resource** r :
-         { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall })
+         { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall, &g_nr.lowFreq })
         ParkNrResource(*r);
 
     g_nr.reset = true;
@@ -1457,7 +1464,8 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
                                   ID3D12Resource* InSource, ID3D12Resource* InModel,
                                   ID3D12Resource* InOriginal, ID3D12Resource* InMotion,
                                   ID3D12Resource* InPrevEdit, ID3D12Resource* OutTarget,
-                                  ID3D12Resource* OutKeep, ID3D12Resource* InDepth)
+                                  ID3D12Resource* OutKeep, ID3D12Resource* InDepth,
+                                  ID3D12Resource* InLowFreq)
 {
     if (!_init || InCmdList == nullptr || _device == nullptr || InSource == nullptr || OutTarget == nullptr)
         return false;
@@ -1496,6 +1504,11 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
     if (depthSrv == nullptr)
         constants.EdgeGuardMode = 0;
 
+    // The detail-only modes read the low-frequency map; without one they would read colour as
+    // luminance ratios. Mode 5 keeps its band, mode 4 has nothing left to do.
+    if (InLowFreq == nullptr && constants.EdgeGuardMode >= 4)
+        constants.EdgeGuardMode = constants.EdgeGuardMode == 5 ? 2 : 0;
+
     ID3D12Resource* const srvs[kSrvCount] = {
         InSource,
         InModel != nullptr ? InModel : InSource,
@@ -1503,11 +1516,12 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
         InMotion != nullptr ? InMotion : InSource,
         InPrevEdit != nullptr ? InPrevEdit : InSource,
         depthSrv != nullptr ? depthSrv : InSource,
+        InLowFreq != nullptr ? InLowFreq : InSource,
     };
 
     for (uint32_t i = 0; i < kSrvCount; ++i)
     {
-        if (i == kSrvCount - 1 && depthSrv != nullptr)
+        if (i == kDepthSlot && depthSrv != nullptr)
         {
             // Written by hand rather than through the shared helper: that helper runs every format
             // through TranslateTypelessFormats, which maps R32_FLOAT_X8X24_TYPELESS -- the only legal
@@ -1776,6 +1790,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             ParkNrResource(g_nr.hdrCopy);
             ParkNrResource(g_nr.colorSmall);
             ParkNrResource(g_nr.outputNative);
+            ParkNrResource(g_nr.lowFreq);
         }
     }
 
@@ -1790,6 +1805,13 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     if (reduced && g_nr.colorSmall == nullptr)
         g_nr.colorSmall = CreateScratch(device, desc.Format, workWidth, workHeight);
+
+    if (g_nr.lowFreq == nullptr)
+    {
+        g_nr.lowFreqWidth = (width + 15u) / 16u;
+        g_nr.lowFreqHeight = (height + 15u) / 16u;
+        g_nr.lowFreq = CreateScratch(device, DXGI_FORMAT_R16G16_FLOAT, g_nr.lowFreqWidth, g_nr.lowFreqHeight);
+    }
 
     // The down-leg target is native (the answer is brought back to frame size before the resolve).
     if (workScale > 1.0f && g_nr.outputNative == nullptr)
@@ -2575,8 +2597,31 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         ID3D12Resource* resolveProxy = superDownOk ? g_nr.colorCopy : modelInput;
         ID3D12Resource* resolveAnswer = superDownOk ? g_nr.outputNative : g_nr.output;
 
+        // The detail-only modes need the low-frequency luminance of both pictures first: one small
+        // dispatch that box-averages 16x16 blocks of the proxy and of the answer into a two-channel
+        // map. Skipped entirely when no such mode is on, so the shipped path is untouched.
+        const bool wantLowFreq = resolveParams.EdgeGuardMode >= 4 && g_nr.lowFreq != nullptr;
+
+        if (wantLowFreq)
+        {
+            DlssNrConstants lowParams {};
+            lowParams.Mode = DlssNrMode_LowFreq;
+            lowParams.Width = g_nr.lowFreqWidth;
+            lowParams.Height = g_nr.lowFreqHeight;
+            lowParams.Passthrough = resolveParams.Passthrough;
+
+            DispatchPass(cmdList, lowParams, resolveProxy, resolveAnswer, nullptr, nullptr, nullptr,
+                         g_nr.lowFreq, nullptr);
+            Barrier(cmdList, g_nr.lowFreq, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        }
+
         DispatchPass(cmdList, resolveParams, resolveProxy, resolveAnswer, g_nr.hdrCopy, motionIn,
-                            exposureTex, target, nullptr, depthIn);
+                            exposureTex, target, nullptr, depthIn, wantLowFreq ? g_nr.lowFreq : nullptr);
+
+        if (wantLowFreq)
+            Barrier(cmdList, g_nr.lowFreq, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
@@ -3109,6 +3154,12 @@ void Shutdown()
     {
         g_nr.colorSmall->Release();
         g_nr.colorSmall = nullptr;
+    }
+
+    if (g_nr.lowFreq != nullptr)
+    {
+        g_nr.lowFreq->Release();
+        g_nr.lowFreq = nullptr;
     }
 
     if (g_nr.superUp != nullptr)
