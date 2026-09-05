@@ -29,7 +29,7 @@ cbuffer Params : register(b0)
     uint  gApplyModel;     // 0 output the clean frame (pass still runs), 1 apply the model's edit
     uint  gUseGameExposure;// D3D12 source-1 only: 1 = read the game's live exposure in-shader (t4)
     float gExposurePreMul; // preExposure * trim, so the live white point is gExposurePreMul / exposure
-    uint  gEdgeGuardMode;  // 0 off, 1 soften, 2 no brightening, 3 luma lock (D3D12 resolve only)
+    uint  gEdgeGuardMode;  // 0 off, 1 soften, 2 no brightening, 3 luma lock, 4 detail only, 5 detail only + no brightening
     float gEdgeGuard;      // how much of the guard lands inside the band, 0..1
     float gEdgeThreshold;  // relative jump in 1/z that counts as a silhouette
     float gEdgeRadius;     // how far the band reaches from the silhouette, in output pixels
@@ -239,6 +239,12 @@ Texture2D<float4>   gExposure : register(t4);
 // Vulkan's descriptor set has no slot for it, and the guard is compiled out there.
 #ifndef VK_MODE
 Texture2D<float4>   gDepth    : register(t5);
+#endif
+
+// The low-frequency luminance map, bound at t6 for the resolve's detail-only modes: R the proxy's
+// mean linear luminance over a 16x16 block, G the model answer's. Written by mode 6. D3D12 only.
+#ifndef VK_MODE
+Texture2D<float4>   gLowFreq  : register(t6);
 #endif
 #ifdef VK_MODE
 [[vk::binding(5, 0)]]
@@ -672,6 +678,51 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         return;
     }
 
+    // The low-frequency map. Each output texel is the mean linear luminance of the block of the
+    // proxy (R) and of the model's answer (G) that lands on it -- an exact area average, like the
+    // downsample below. The two are decoded from their sRGB encoding first, so the ratio between
+    // them is the model's large-scale change of brightness in the proxy's own (hybrid, identity in
+    // the midtones) space, which is close enough to the linear ratio the resolve wants.
+#ifndef VK_MODE
+    if (gMode == 6)
+    {
+        uint sw, sh, mw, mh;
+        gSource.GetDimensions(sw, sh);
+        gModel.GetDimensions(mw, mh);
+
+        float sumP = 0.0, sumM = 0.0;
+        uint nP = 0, nM = 0;
+
+        {
+            const uint x0 = (id.x * sw) / gWidth, x1 = max(((id.x + 1) * sw) / gWidth, x0 + 1);
+            const uint y0 = (id.y * sh) / gHeight, y1 = max(((id.y + 1) * sh) / gHeight, y0 + 1);
+            for (uint y = y0; y < y1; ++y)
+                for (uint x = x0; x < x1; ++x)
+                {
+                    float3 c = gSource.Load(int3(min(x, sw - 1), min(y, sh - 1), 0)).rgb;
+                    if (gPassthrough == 0) c = SrgbToLinear(c);
+                    sumP += dot(max(c, 0.0), kLuma);
+                    nP++;
+                }
+        }
+        {
+            const uint x0 = (id.x * mw) / gWidth, x1 = max(((id.x + 1) * mw) / gWidth, x0 + 1);
+            const uint y0 = (id.y * mh) / gHeight, y1 = max(((id.y + 1) * mh) / gHeight, y0 + 1);
+            for (uint y = y0; y < y1; ++y)
+                for (uint x = x0; x < x1; ++x)
+                {
+                    float3 c = gModel.Load(int3(min(x, mw - 1), min(y, mh - 1), 0)).rgb;
+                    if (gPassthrough == 0) c = SrgbToLinear(c);
+                    sumM += dot(max(c, 0.0), kLuma);
+                    nM++;
+                }
+        }
+
+        gTarget[id.xy] = float4(sumP / max(nP, 1u), sumM / max(nM, 1u), 0.0, 1.0);
+        return;
+    }
+#endif
+
     if (gMode == 2)
     {
         uint srcW, srcH;
@@ -1088,7 +1139,20 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    if (gEdgeGuardMode != 0)
+    // Detail only (modes 4 and 5): the model may add detail, never change the brightness of a
+    // region. Its large-scale change is the ratio of the two low-frequency luminances -- the
+    // answer's over the proxy's, both averaged over 16x16 blocks and read back bilinearly, which
+    // is a blur of a few dozen pixels -- and dividing that back out leaves the high-frequency edit
+    // whole while a glow that spreads across a wall is undone wherever it is, silhouette or not.
+    // Bounded so a wrong block near a hard edge cannot swing a pixel more than 3x either way.
+    if (gEdgeGuardMode >= 4)
+    {
+        const float2 lp = gLowFreq.SampleLevel(gLinear, cmpUv, 0).rg;
+        const float k = clamp((lp.y + 1e-4) / (lp.x + 1e-4), 1.0 / 3.0, 3.0);
+        result *= lerp(1.0, 1.0 / k, saturate(gEdgeGuard));
+    }
+
+    if (gEdgeGuardMode != 0 && gEdgeGuardMode != 4)
     {
         const float e = EdgeFactor(cmpUv) * saturate(gEdgeGuard);
 
@@ -1099,7 +1163,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 
             if (gEdgeGuardMode == 1)
                 result = lerp(result, original, e);
-            else if (gEdgeGuardMode == 2)
+            else if (gEdgeGuardMode == 2 || gEdgeGuardMode == 5)
             {
                 if (rl > ol)
                     result *= lerp(1.0, (ol + 1e-6) / (rl + 1e-6), e);
