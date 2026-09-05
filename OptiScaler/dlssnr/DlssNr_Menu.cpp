@@ -200,8 +200,8 @@ void RenderMenu(Config* config, float menuResScale)
             ImGui::PushStyleColor(ImGuiCol_Text, colour);
             ImGui::PushStyleColor(ImGuiCol_SliderGrab, colour);
 
-            if (ImGui::SliderInt("Passes", &passes, 1, 3, passes == 1 ? "%d (native)" : "%dx cost"))
-                config->DlssNrPasses = (uint32_t) (passes < 1 ? 1 : (passes > 3 ? 3 : passes));
+            if (ImGui::SliderInt("Passes", &passes, 1, 4, passes == 1 ? "%d (native)" : "%dx cost"))
+                config->DlssNrPasses = (uint32_t) (passes < 1 ? 1 : (passes > 4 ? 4 : passes));
 
             ImGui::PopStyleColor(2);
 
@@ -216,10 +216,11 @@ void RenderMenu(Config* config, float menuResScale)
                            "\nAbove it the model is enhancing its own output, outside its"
                            "\ntraining distribution -- detail compounds, and so does anything"
                            "\nit got wrong."
-                           "\n\n2 and 3 can look good with fine tuning. 3 is the ceiling: past"
-                           "\nit quality, memory and speed fall off together, and re-feeding"
-                           "\nconverges -- each pass moves the picture less than the last, so a"
-                           "\nfourth pays a whole model run to change almost nothing."
+                           "\n\n2 and 3 can look good with fine tuning. 4 is the lab ceiling:"
+                           "\nre-feeding converges -- each pass moves the picture less than the"
+                           "\nlast -- so a fourth pays a whole model run to change little, and"
+                           "\nquality, memory and speed fall off together past it. Try it, look,"
+                           "\nand come back down if it does not earn its cost."
                            "\n\nThis is a screenshot tool. It is not meant for playing."
                            "\n\nIf the model is running below frame size, extra passes need its"
                            "\ninput and output to match; where they do not, this quietly runs"
