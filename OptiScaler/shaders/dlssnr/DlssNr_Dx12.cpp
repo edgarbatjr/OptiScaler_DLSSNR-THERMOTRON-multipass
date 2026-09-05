@@ -2486,12 +2486,25 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         if (pass > 0)
             g_nr.passNeedsReset[pass] = false;
 
+        // Per-pass decay. The silhouette glow is border contrast the model pulls, and N passes pull it
+        // N times; a weaker later pass pulls less of it while still being shown the whole frame (which
+        // is what the between-pass lock took away, and why that lost detail). 1.0 is the old behaviour.
+        // Skin structure follows only when it is set on its own (-1 means "same as local structure",
+        // which is already scaled).
+        const float passScale = pass == 0   ? 1.0f
+                                : pass == 1 ? std::clamp(cfg.DlssNrPassDecay2.value_or_default(), 0.0f, 2.0f)
+                                            : std::clamp(cfg.DlssNrPassDecay3.value_or_default(), 0.0f, 2.0f);
+        const float passIntensity = cfg.DlssNrIntensity.value_or_default() * passScale;
+        const float passStructure = cfg.DlssNrLocalStructure.value_or_default() * passScale;
+        const float skinIn = cfg.DlssNrSkinStructure.value_or_default();
+        const float passSkin = skinIn < 0.0f ? skinIn : skinIn * passScale;
+
         result = g_nr.evaluate(
             cmdList, passUses, g_nr.capabilityParams, modelInput, depthIn, motionIn, g_nr.output,
             workWidth, workHeight, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0,
-            passReset, cfg.DlssNrIntensity.value_or_default(),
-            (int) cfg.DlssNrStyle.value_or_default(), cfg.DlssNrLocalStructure.value_or_default(),
-            passTone, cfg.DlssNrSkinStructure.value_or_default(),
+            passReset, passIntensity,
+            (int) cfg.DlssNrStyle.value_or_default(), passStructure,
+            passTone, passSkin,
             cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToWork,
             g_nr.guideMvScaleY * mvToWork);
     }
