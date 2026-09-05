@@ -22,8 +22,10 @@ enum DlssNrMode : uint32_t
     DlssNrMode_Meter = 3,      // the exposure texture -> tile (0,0), for the white point
     DlssNrMode_Calibrate = 4,  // the untouched frame -> a grid of tile peak luminances
     DlssNrMode_LowFreq = 6,    // proxy + answer -> 16x16-block mean luminances (R proxy, G answer)
-    DlssNrMode_LowFreqApply = 7 // a pass answer -> the same answer with its low-frequency luminance
-                                // matched to the first pass's input (between passes)
+    DlssNrMode_LowFreqApply = 7, // a pass answer -> the same answer with its low-frequency luminance
+                                 // matched to the first pass's input (between passes)
+    DlssNrMode_MixedCompose = 8  // first pass (full) + later passes (small) -> a full-size answer:
+                                 // pass1 + enlarge(smallOut - smallBase). Mixed-resolution passes.
 };
 
 // The meter's grid. 64 x 64 tiles over the whole frame, whatever its size.
