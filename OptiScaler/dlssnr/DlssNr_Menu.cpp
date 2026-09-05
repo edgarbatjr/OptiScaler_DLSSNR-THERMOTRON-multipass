@@ -262,32 +262,48 @@ void RenderMenu(Config* config, float menuResScale)
                     config->DlssNrPassDecay4 = 1.0f;
                 }
 
-                // Mixed resolution: the later passes at a fraction of the working size. Committed on
-                // release, because each distinct value rebuilds the later passes' features.
-                static int pendingLater = -1;
-                int laterPercent = pendingLater >= 0
-                                       ? pendingLater
-                                       : (int) lroundf(config->DlssNrLaterPassScale.value_or_default() * 100.0f);
+                // Mixed resolution: each later pass at its own fraction of the working size.
+                // Committed on release, because each distinct value rebuilds that pass's feature.
+                static int pendingScale[5] = { -1, -1, -1, -1, -1 };
+                CustomOptional<float>* scaleOpts[5] = { nullptr, nullptr, &config->DlssNrPassScale2,
+                                                        &config->DlssNrPassScale3, &config->DlssNrPassScale4 };
+                static const char* scaleLabels[5] = { "", "", "Pass 2 resolution", "Pass 3 resolution",
+                                                      "Pass 4 resolution" };
 
-                if (ImGui::SliderInt("Later passes resolution", &laterPercent, 25, 100,
-                                     laterPercent >= 100 ? "%d%% (same as pass 1)" : "%d%%"))
-                    pendingLater = laterPercent;
-
-                if (ImGui::IsItemDeactivatedAfterEdit() && pendingLater >= 0)
+                for (int p = 2; p <= passes && p <= 4; ++p)
                 {
-                    config->DlssNrLaterPassScale = std::clamp(pendingLater, 25, 100) / 100.0f;
-                    pendingLater = -1;
+                    int percent = pendingScale[p] >= 0
+                                      ? pendingScale[p]
+                                      : (int) lroundf(scaleOpts[p]->value_or_default() * 100.0f);
+
+                    if (ImGui::SliderInt(scaleLabels[p], &percent, 25, 100,
+                                         percent >= 100 ? "%d%% (same as pass 1)" : "%d%%"))
+                        pendingScale[p] = percent;
+
+                    if (ImGui::IsItemDeactivatedAfterEdit() && pendingScale[p] >= 0)
+                    {
+                        *scaleOpts[p] = std::clamp(pendingScale[p], 25, 100) / 100.0f;
+                        pendingScale[p] = -1;
+                    }
                 }
 
-                HelpMarker("Mixed-resolution passes. Pass 1 runs at the working size (Model"
-                               "\nresolution above); passes 2-4 run at this fraction of it, and what"
-                               "\nthey add comes back as a residual laid over pass 1's full-size"
-                               "\nanswer. So the fine texture of pass 1 is kept whole, the later"
-                               "\npasses -- which mostly compound the silhouette glow -- run"
-                               "\nsmaller, softer and cheaper. 70% is a good start: about half the"
-                               "\ncost of the later passes, and the glow they add is blurred by the"
-                               "\nenlargement. 100% is the old behaviour. Ignored while Model"
-                               "\nresolution is below 100% (that reduction wins).");
+                HelpMarker("Mixed-resolution passes. Pass 1 always runs at Model resolution; each"
+                               "\nlater pass can run at a fraction of it. The pass is shown the"
+                               "\ncurrent picture shrunk, and what it adds comes back as a residual"
+                               "\nlaid over the full-size picture -- so pass 1's fine texture is"
+                               "\nkept whole while the later passes, which mostly compound the"
+                               "\nsilhouette glow, run smaller, softer and cheaper."
+                               "\n\nGo DOWN the ladder, never up: 100 / 85 / 70 keeps the detail"
+                               "\nand loses the glow; 70 / 85 / 100 throws the detail away first"
+                               "\nand then paints the glow at full size. 100% everywhere is the old"
+                               "\nbehaviour. Works with Model resolution at any value.");
+
+                if (ImGui::Button("Reset##passscale"))
+                {
+                    config->DlssNrPassScale2 = 1.0f;
+                    config->DlssNrPassScale3 = 1.0f;
+                    config->DlssNrPassScale4 = 1.0f;
+                }
             }
         }
 

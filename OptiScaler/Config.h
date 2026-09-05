@@ -303,11 +303,14 @@ class Config
     CustomOptional<float> DlssNrPassDecay2 { 1.0f };
     CustomOptional<float> DlssNrPassDecay3 { 1.0f };
     CustomOptional<float> DlssNrPassDecay4 { 1.0f };
-    // Mixed-resolution passes: the first pass runs at the working size, the later ones at this
-    // fraction of it (0.25..1). Their answer comes back as a residual over the first pass's full-size
-    // picture, so the fine texture of pass 1 is kept while the later passes -- which mostly add the
-    // silhouette glow -- run smaller, cheaper and softer. 1.0 = off (every pass at the working size).
-    CustomOptional<float> DlssNrLaterPassScale { 1.0f };
+    // Mixed-resolution passes: each later pass at its own fraction of the working size (0.25..1).
+    // The pass is shown the current full-size picture shrunk, and what it adds comes back as a
+    // residual over the full-size picture, so pass 1's fine texture is kept while the later passes
+    // -- which mostly compound the silhouette glow -- run smaller, cheaper and softer. 1.0 = that
+    // pass at the working size (the old behaviour).
+    CustomOptional<float> DlssNrPassScale2 { 1.0f };
+    CustomOptional<float> DlssNrPassScale3 { 1.0f };
+    CustomOptional<float> DlssNrPassScale4 { 1.0f };
 
     // Whether the model's edit is applied. Off keeps the pass running (so Hold frame works) but shows
     // the clean upscaler frame -- for A/B'ing NR on/off on a frozen frame. Default true.
