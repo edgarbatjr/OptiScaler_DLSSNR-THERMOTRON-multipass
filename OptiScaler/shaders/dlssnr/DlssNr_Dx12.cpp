@@ -1485,7 +1485,8 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
     {
         const D3D12_RESOURCE_DESC dd = InDepth->GetDesc();
 
-        if ((dd.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) == 0)
+        if ((dd.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) == 0 && dd.SampleDesc.Count == 1 &&
+            dd.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D)
         {
             depthSrv = InDepth;
             depthFormat = DepthSrvFormat(dd.Format);
@@ -1507,7 +1508,30 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
     for (uint32_t i = 0; i < kSrvCount; ++i)
     {
         if (i == kSrvCount - 1 && depthSrv != nullptr)
-            CreateShaderResourceView(_device, srvs[i], currentHeap.GetSrvCPU(i), depthFormat);
+        {
+            // Written by hand rather than through the shared helper: that helper runs every format
+            // through TranslateTypelessFormats, which maps R32_FLOAT_X8X24_TYPELESS -- the only legal
+            // view of a D32S8 depth -- back to D32_FLOAT_S8X24_UINT, a depth format no SRV may use.
+            // That is DXGI_ERROR_INVALID_CALL and a removed device on an RE Engine depth buffer.
+            const D3D12_RESOURCE_DESC dd = depthSrv->GetDesc();
+            D3D12_SHADER_RESOURCE_VIEW_DESC sd {};
+            sd.Format = depthFormat;
+            sd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+            if (dd.DepthOrArraySize > 1)
+            {
+                sd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                sd.Texture2DArray.MipLevels = 1;
+                sd.Texture2DArray.ArraySize = 1;
+            }
+            else
+            {
+                sd.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                sd.Texture2D.MipLevels = 1;
+            }
+
+            _device->CreateShaderResourceView(depthSrv, &sd, currentHeap.GetSrvCPU(i));
+        }
         else
             CreateShaderResourceView(_device, srvs[i], currentHeap.GetSrvCPU(i));
     }
