@@ -476,13 +476,6 @@ class Config
     // passes are sequential and each one needs the last one's output.
     CustomOptional<uint32_t> DlssNrPasses { 1 };
 
-    // The fraction of the working size the passes after the first run at. 1.0 runs every pass at the
-    // working size, as before. Below 1 the first pass keeps its size and the later ones are shown a
-    // shrink of its answer, refine that, and only what they added is enlarged back onto the first
-    // pass's answer (a residual) -- so the first pass's own detail is never replaced by a softer copy.
-    // Cost of a refine pass scales with the area: 0.7 is about half a full pass.
-    CustomOptional<float> DlssNrRefineScale { 1.0f };
-
     // Which depth convention the model is told the guide uses.
     //
     //   0  what the game's own DLSS feature was created with, which is what it means for the upscaler
