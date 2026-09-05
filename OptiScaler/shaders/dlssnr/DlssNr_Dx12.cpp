@@ -248,6 +248,21 @@ struct NrState
     unsigned int workWidth = 0;
     unsigned int workHeight = 0;
 
+    // Refine passes (RefineScale < 1): the passes after the first run at a smaller size than it.
+    // refineShown is the first pass's answer shrunk to that size -- what the refine passes are shown
+    // and the picture their residual is measured against; refineIn is the copy that chains one
+    // refine pass into the next; refineOut is what a refine pass returns; refineSum is the first
+    // pass's answer with the residual laid on, at the working size, copied back over the answer.
+    // passSize is the size the pass features were built at, so a changed refine size rebuilds them.
+    ID3D12Resource* refineShown = nullptr;
+    ID3D12Resource* refineIn = nullptr;
+    ID3D12Resource* refineOut = nullptr;
+    ID3D12Resource* refineSum = nullptr;
+    unsigned int refineWidth = 0;
+    unsigned int refineHeight = 0;
+    unsigned int passWidth = 0;
+    unsigned int passHeight = 0;
+
     // The white point meter.
     //
     // A 64x64 grid of tile luminances, copied to a readback buffer and looked at a few frames later.
@@ -1669,6 +1684,17 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     const auto workHeight = (unsigned int) (height * workScale + 0.5f);
     const bool reduced = workWidth != width || workHeight != height;
 
+    // What the passes after the first work at. Same working size unless RefineScale says smaller;
+    // only meaningful with more than one pass, so a single pass ignores it.
+    float refineScale = cfg.DlssNrRefineScale.value_or_default();
+    refineScale = refineScale < 0.25f ? 0.25f : (refineScale > 1.0f ? 1.0f : refineScale);
+    const auto refineWidth = (unsigned int) (workWidth * refineScale + 0.5f);
+    const auto refineHeight = (unsigned int) (workHeight * refineScale + 0.5f);
+    const bool refine = cfg.DlssNrPasses.value_or_default() > 1 &&
+                        (refineWidth != workWidth || refineHeight != workHeight);
+    const unsigned int passWidth = refine ? refineWidth : workWidth;
+    const unsigned int passHeight = refine ? refineHeight : workHeight;
+
     ReleaseSurfacesIfFormatChanged(desc.Format);
 
     const bool resolutionChanged = g_nr.width != width || g_nr.height != height ||
@@ -1698,7 +1724,38 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             ParkNrResource(g_nr.hdrCopy);
             ParkNrResource(g_nr.colorSmall);
             ParkNrResource(g_nr.outputNative);
+            ParkNrResource(g_nr.refineShown);
+            ParkNrResource(g_nr.refineIn);
+            ParkNrResource(g_nr.refineOut);
+            ParkNrResource(g_nr.refineSum);
         }
+    }
+
+    // A changed refine size means the pass features are the wrong size for what they will be shown;
+    // they are rebuilt (a frame later, by the frame-ahead rule) and the refine surfaces with them.
+    if (g_nr.passWidth != passWidth || g_nr.passHeight != passHeight)
+    {
+        for (void*& f : g_nr.passFeature)
+            ParkNrFeature(f);
+
+        ParkNrResource(g_nr.refineShown);
+        ParkNrResource(g_nr.refineIn);
+        ParkNrResource(g_nr.refineOut);
+        ParkNrResource(g_nr.refineSum);
+        g_nr.passWidth = passWidth;
+        g_nr.passHeight = passHeight;
+        g_nr.refineWidth = refineWidth;
+        g_nr.refineHeight = refineHeight;
+    }
+
+    if (refine && g_nr.refineShown == nullptr)
+    {
+        g_nr.refineShown = CreateScratch(device, desc.Format, refineWidth, refineHeight);
+        g_nr.refineIn = CreateScratch(device, desc.Format, refineWidth, refineHeight);
+        g_nr.refineOut = CreateScratch(device, desc.Format, refineWidth, refineHeight);
+        g_nr.refineSum = CreateScratch(device, desc.Format, workWidth, workHeight);
+        LOG_INFO("DLSS-NR: refine passes at {}x{} ({}%), first pass at {}x{}", refineWidth, refineHeight,
+                 (int) (refineScale * 100.0f + 0.5f), workWidth, workHeight);
     }
 
     if (g_nr.output == nullptr)
@@ -2213,7 +2270,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 {
                     g_nr.passFeature[i] = g_nr.create(
                         snip->wstring().c_str(), State::Instance().NVNGX_ApplicationDataPath.c_str(),
-                        device, cmdList, g_nr.capabilityParams, workWidth, workHeight,
+                        device, cmdList, g_nr.capabilityParams, passWidth, passHeight,
                         (int) cfg.DlssNrPreset.value_or_default(), cfg.DlssNrIntensity.value_or_default(),
                         (int) cfg.DlssNrStyle.value_or_default(),
                         cfg.DlssNrLocalStructure.value_or_default(),
@@ -2274,6 +2331,17 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     int result = 1;
 
+    // Refine passes: the extra passes run on their own, smaller surfaces (see the fields). refineRan
+    // says at least one did this frame, so the residual has something to lay on; refineChain says
+    // the shrink of the first pass's answer exists, which every refine pass after the first needs.
+    const bool refining = refine && passes > 1 && g_nr.refineShown != nullptr &&
+                          g_nr.refineIn != nullptr && g_nr.refineOut != nullptr &&
+                          g_nr.refineSum != nullptr;
+    bool refineRan = false;
+    bool refineShownMade = false;
+    bool refineChained = false;
+    const float mvToRefine = width != 0 ? (float) refineWidth / (float) width : 1.0f;
+
     for (unsigned int pass = 0; pass < passes && result == 1; ++pass)
     {
         // Frame-ahead rule: a pass feature built on this very command list is not evaluated on it.
@@ -2282,7 +2350,63 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         if (pass > 0 && (g_nr.passFeature[pass] == nullptr || g_nr.passFeatureFresh[pass]))
             continue;
 
-        if (pass > 0)
+        // A refine pass after the first refine pass needs the first one's answer to chain from.
+        if (pass > 1 && refining && !refineRan)
+            continue;
+
+        ID3D12Resource* passInput = modelInput;
+        ID3D12Resource* passOutput = g_nr.output;
+        unsigned int passW = workWidth;
+        unsigned int passH = workHeight;
+        float passMv = mvToWork;
+
+        if (pass > 0 && refining)
+        {
+            passW = refineWidth;
+            passH = refineHeight;
+            passMv = mvToRefine;
+            passOutput = g_nr.refineOut;
+
+            if (!refineRan)
+            {
+                // The first refine pass is shown the first pass's answer, shrunk by the area
+                // resample. The answer goes SRV here and stays so until the residual reads it.
+                Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+                DlssNrConstants down {};
+                down.Mode = DlssNrMode_Downsample;
+                down.Width = refineWidth;
+                down.Height = refineHeight;
+                DispatchPass(cmdList, down, g_nr.output, nullptr, nullptr, nullptr, nullptr,
+                             g_nr.refineShown, nullptr);
+                Barrier(cmdList, g_nr.refineShown, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+                passInput = g_nr.refineShown;
+                refineShownMade = true;
+            }
+            else
+            {
+                // Later refine passes chain from the last refine answer, through a copy, exactly as
+                // the full-size passes do below.
+                Barrier(cmdList, g_nr.refineOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE);
+                Barrier(cmdList, g_nr.refineIn, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_COPY_DEST);
+
+                cmdList->CopyResource(g_nr.refineIn, g_nr.refineOut);
+
+                Barrier(cmdList, g_nr.refineIn, D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                Barrier(cmdList, g_nr.refineOut, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+                passInput = g_nr.refineIn;
+                refineChained = true;
+            }
+        }
+        else if (pass > 0)
         {
             Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -2315,13 +2439,63 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             g_nr.passNeedsReset[pass] = false;
 
         result = g_nr.evaluate(
-            cmdList, passUses, g_nr.capabilityParams, modelInput, depthIn, motionIn, g_nr.output,
-            workWidth, workHeight, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0,
+            cmdList, passUses, g_nr.capabilityParams, passInput, depthIn, motionIn, passOutput,
+            passW, passH, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0,
             passReset, cfg.DlssNrIntensity.value_or_default(),
             (int) cfg.DlssNrStyle.value_or_default(), cfg.DlssNrLocalStructure.value_or_default(),
             passTone, cfg.DlssNrSkinStructure.value_or_default(),
-            cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToWork,
-            g_nr.guideMvScaleY * mvToWork);
+            cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * passMv,
+            g_nr.guideMvScaleY * passMv);
+
+        if (pass > 0 && refining && result == 1)
+            refineRan = true;
+    }
+
+    // The residual: what the refine passes added, enlarged onto the first pass's answer. Summed into
+    // its own surface and copied back over the answer, which then carries on to the resolve exactly
+    // as a same-size multi-pass answer would.
+    if (refineRan)
+    {
+        Barrier(cmdList, g_nr.refineOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        DlssNrConstants sum {};
+        sum.Mode = DlssNrMode_Refine;
+        sum.Width = workWidth;
+        sum.Height = workHeight;
+        sum.TransferStrength = 1.0f;
+        DispatchPass(cmdList, sum, g_nr.refineShown, g_nr.refineOut, g_nr.output, nullptr, nullptr,
+                     g_nr.refineSum, nullptr);
+
+        Barrier(cmdList, g_nr.refineSum, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_COPY_SOURCE);
+        Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_COPY_DEST);
+
+        cmdList->CopyResource(g_nr.output, g_nr.refineSum);
+
+        Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, g_nr.refineSum, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+        // Everything refine-side goes back to the state it is created in, ready for next frame.
+        Barrier(cmdList, g_nr.refineOut, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, g_nr.refineShown, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if (refineChained)
+            Barrier(cmdList, g_nr.refineIn, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
+    else if (refineShownMade)
+    {
+        // The shrink was made but no refine pass came back with an answer (an evaluate failed):
+        // put the two surfaces back so the states are right whatever happens next.
+        Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, g_nr.refineShown, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
 
     if (g_ngxTime != nullptr)
@@ -3045,6 +3219,17 @@ void Shutdown()
         g_nr.outputNative->Release();
         g_nr.outputNative = nullptr;
     }
+
+    for (ID3D12Resource** r : { &g_nr.refineShown, &g_nr.refineIn, &g_nr.refineOut, &g_nr.refineSum })
+    {
+        if (*r != nullptr)
+        {
+            (*r)->Release();
+            *r = nullptr;
+        }
+    }
+    g_nr.passWidth = 0;
+    g_nr.passHeight = 0;
 
     if (g_nr.heldColor != nullptr)
     {
