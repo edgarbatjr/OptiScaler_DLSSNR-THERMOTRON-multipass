@@ -235,9 +235,15 @@ void RenderMenu(Config* config, float menuResScale)
                 if (passes > 2)
                 {
                     float decay3 = config->DlssNrPassDecay3.value_or_default();
-                    if (ImGui::SliderFloat(passes > 3 ? "Pass 3+4 strength" : "Pass 3 strength", &decay3,
-                                           0.0f, 1.5f, "%.2f x"))
+                    if (ImGui::SliderFloat("Pass 3 strength", &decay3, 0.0f, 1.5f, "%.2f x"))
                         config->DlssNrPassDecay3 = decay3;
+                }
+
+                if (passes > 3)
+                {
+                    float decay4 = config->DlssNrPassDecay4.value_or_default();
+                    if (ImGui::SliderFloat("Pass 4 strength", &decay4, 0.0f, 1.5f, "%.2f x"))
+                        config->DlssNrPassDecay4 = decay4;
                 }
 
                 HelpMarker("Per-pass decay. The later passes run with Intensity and Local structure"
@@ -246,13 +252,14 @@ void RenderMenu(Config* config, float menuResScale)
                                "\ncontrast the model pulls, and three passes pull it three times. A"
                                "\nweaker second and third pass pull less of it while the model still"
                                "\nsees the whole frame, so texture keeps compounding but the glow"
-                               "\ndoes not (as much). 1.00 is the old behaviour. Try 0.7 / 0.5."
+                               "\ndoes not (as much). 1.00 is the old behaviour. Try 0.7 / 0.5 / 0.35."
                                "\n\nCosts nothing: it is two numbers handed to the model.");
 
                 if (ImGui::Button("Reset##passdecay"))
                 {
                     config->DlssNrPassDecay2 = 1.0f;
                     config->DlssNrPassDecay3 = 1.0f;
+                    config->DlssNrPassDecay4 = 1.0f;
                 }
             }
         }

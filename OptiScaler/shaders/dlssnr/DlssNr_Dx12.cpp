@@ -2493,7 +2493,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         // which is already scaled).
         const float passScale = pass == 0   ? 1.0f
                                 : pass == 1 ? std::clamp(cfg.DlssNrPassDecay2.value_or_default(), 0.0f, 2.0f)
-                                            : std::clamp(cfg.DlssNrPassDecay3.value_or_default(), 0.0f, 2.0f);
+                                : pass == 2 ? std::clamp(cfg.DlssNrPassDecay3.value_or_default(), 0.0f, 2.0f)
+                                            : std::clamp(cfg.DlssNrPassDecay4.value_or_default(), 0.0f, 2.0f);
         const float passIntensity = cfg.DlssNrIntensity.value_or_default() * passScale;
         const float passStructure = cfg.DlssNrLocalStructure.value_or_default() * passScale;
         const float skinIn = cfg.DlssNrSkinStructure.value_or_default();
