@@ -295,6 +295,13 @@ class Config
     // Detail-only modes: also lock the low-frequency luminance BETWEEN passes, so pass N+1 is shown a
     // frame without pass N's glow and the halo does not compound with the pass count.
     CustomOptional<bool> DlssNrEdgeBetweenPasses { true };
+    // Per-pass decay: the second pass runs with intensity and local structure scaled by PassDecay2,
+    // the third and fourth by PassDecay3. 1.0 = every pass at full strength (the old behaviour).
+    // The point is the silhouette glow: it is border contrast the model pulls, and with N passes it
+    // is pulled N times. Weaker later passes pull less of it while the model still sees the whole
+    // frame, which the between-pass lock did not allow.
+    CustomOptional<float> DlssNrPassDecay2 { 1.0f };
+    CustomOptional<float> DlssNrPassDecay3 { 1.0f };
 
     // Whether the model's edit is applied. Off keeps the pass running (so Hold frame works) but shows
     // the clean upscaler frame -- for A/B'ing NR on/off on a frozen frame. Default true.

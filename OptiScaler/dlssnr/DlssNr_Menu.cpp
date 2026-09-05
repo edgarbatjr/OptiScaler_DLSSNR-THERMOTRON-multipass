@@ -225,6 +225,36 @@ void RenderMenu(Config* config, float menuResScale)
                            "\n\nIf the model is running below frame size, extra passes need its"
                            "\ninput and output to match; where they do not, this quietly runs"
                            "\none and says so in the log.");
+
+            if (passes > 1)
+            {
+                float decay2 = config->DlssNrPassDecay2.value_or_default();
+                if (ImGui::SliderFloat("Pass 2 strength", &decay2, 0.0f, 1.5f, "%.2f x"))
+                    config->DlssNrPassDecay2 = decay2;
+
+                if (passes > 2)
+                {
+                    float decay3 = config->DlssNrPassDecay3.value_or_default();
+                    if (ImGui::SliderFloat(passes > 3 ? "Pass 3+4 strength" : "Pass 3 strength", &decay3,
+                                           0.0f, 1.5f, "%.2f x"))
+                        config->DlssNrPassDecay3 = decay3;
+                }
+
+                HelpMarker("Per-pass decay. The later passes run with Intensity and Local structure"
+                               "\nmultiplied by this, the first pass always at full strength."
+                               "\n\nThis is the cheap halo lever. The glow along a silhouette is border"
+                               "\ncontrast the model pulls, and three passes pull it three times. A"
+                               "\nweaker second and third pass pull less of it while the model still"
+                               "\nsees the whole frame, so texture keeps compounding but the glow"
+                               "\ndoes not (as much). 1.00 is the old behaviour. Try 0.7 / 0.5."
+                               "\n\nCosts nothing: it is two numbers handed to the model.");
+
+                if (ImGui::Button("Reset##passdecay"))
+                {
+                    config->DlssNrPassDecay2 = 1.0f;
+                    config->DlssNrPassDecay3 = 1.0f;
+                }
+            }
         }
 
         // Any percentage, rather than a handful of steps somebody chose in advance. The lower bound
