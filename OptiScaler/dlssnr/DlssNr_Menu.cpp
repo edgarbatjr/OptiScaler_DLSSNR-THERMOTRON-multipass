@@ -389,6 +389,54 @@ void RenderMenu(Config* config, float menuResScale)
                        "\nstable. If you love the Replace look but the flicker bothers you, use this."
                        "\n\nOff is byte-identical to before.");
 
+        // The edge guard. D3D12 only: the Vulkan pass has no depth slot and ignores these.
+        static const char* edgeNames[] = { "Off", "Soften (blend to frame)", "No brightening",
+                                           "Luma lock (model colour, frame light)" };
+        int edgeMode = (int) config->DlssNrEdgeGuardMode.value_or_default();
+        if (edgeMode < 0 || edgeMode > 3)
+            edgeMode = 0;
+        if (ImGui::Combo("Edge guard (halo)", &edgeMode, edgeNames, IM_ARRAYSIZE(edgeNames)))
+            config->DlssNrEdgeGuardMode = (uint32_t) edgeMode;
+
+        HelpMarker("The halo: a lit rim the model paints on the background along a subject's"
+                       "\nsilhouette, and every pass paints over the last one's. The game's depth says"
+                       "\nexactly where the silhouettes are, so inside a band next to a depth jump the"
+                       "\nedit is held back."
+                       "\n\nSoften blends the result back toward the frame in the band. No brightening"
+                       "\nlets the edit darken there but never lift a pixel, which is what the halo is."
+                       "\nLuma lock keeps the model's colour and texture but the frame's own light."
+                       "\n\nDebug view 'Edge guard band' shows the band. Off is byte-identical.");
+
+        if (edgeMode != 0)
+        {
+            float edgeGuard = config->DlssNrEdgeGuard.value_or_default();
+            if (ImGui::SliderFloat("Edge guard strength", &edgeGuard, 0.0f, 1.0f, "%.2f"))
+                config->DlssNrEdgeGuard = edgeGuard;
+
+            float edgeThr = config->DlssNrEdgeThreshold.value_or_default();
+            if (ImGui::SliderFloat("Edge threshold (1/z jump)", &edgeThr, 0.01f, 0.5f, "%.2f"))
+                config->DlssNrEdgeThreshold = edgeThr;
+
+            HelpMarker("How big a depth jump counts as a silhouette, as a fraction of 1/z. 0.10 means"
+                           "\nthe far side is at least 10% further away. Lower catches more edges"
+                           "\n(and eventually ordinary surfaces); higher only the clearest silhouettes.");
+
+            float edgeRadius = config->DlssNrEdgeRadius.value_or_default();
+            if (ImGui::SliderFloat("Edge band radius (px)", &edgeRadius, 1.0f, 24.0f, "%.0f"))
+                config->DlssNrEdgeRadius = edgeRadius;
+
+            HelpMarker("How far from the silhouette the band reaches, in output pixels. The halo is"
+                           "\nusually 3-8 pixels wide at 4K; widen it if a faint rim survives.");
+
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##edge"))
+            {
+                config->DlssNrEdgeGuard = 0.8f;
+                config->DlssNrEdgeThreshold = 0.10f;
+                config->DlssNrEdgeRadius = 6.0f;
+            }
+        }
+
         ImGui::SeparatorText("Model");
 
         ImGui::TextUnformatted("Read when the model is built, so a change rebuilds it after a moment.");
@@ -1098,7 +1146,7 @@ void RenderMenu(Config* config, float menuResScale)
         }
 
         static const char* debugNames[] = { "Off", "Proxy (what the model sees)", "Model output (raw)",
-                                            "Difference (amplified)" };
+                                            "Difference (amplified)", "Edge guard band" };
         int debugView = (int) config->DlssNrDebugView.value_or_default();
         if (ImGui::Combo("Debug view", &debugView, debugNames, IM_ARRAYSIZE(debugNames)))
             config->DlssNrDebugView = (uint32_t) debugView;

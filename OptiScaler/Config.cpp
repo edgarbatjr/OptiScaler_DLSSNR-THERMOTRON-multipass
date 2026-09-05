@@ -366,6 +366,10 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrSkinStructure.set_from_config(readFloat("DlssNr", "SkinStructure"));
             DlssNrAutoMask.set_from_config(readBool("DlssNr", "AutoMask"));
             DlssNrReversibleMode.set_from_config(readUInt("DlssNr", "ReversibleMode"));
+            DlssNrEdgeGuardMode.set_from_config(readUInt("DlssNr", "EdgeGuardMode"));
+            DlssNrEdgeGuard.set_from_config(readFloat("DlssNr", "EdgeGuard"));
+            DlssNrEdgeThreshold.set_from_config(readFloat("DlssNr", "EdgeThreshold"));
+            DlssNrEdgeRadius.set_from_config(readFloat("DlssNr", "EdgeRadius"));
             DlssNrApplyModel.set_from_config(readBool("DlssNr", "ApplyModel"));
             DlssNrHoldFrame.set_from_config(readBool("DlssNr", "HoldFrame"));
             UseGenericAppIdWithDlss.set_from_config(readBool("DLSS", "UseGenericAppIdWithDlss"));
@@ -1257,6 +1261,10 @@ bool Config::SaveIni()
                  GetFloatValue(Instance()->DlssNrSkinStructure.value_for_config()).c_str());
     ini.SetValue("DlssNr", "AutoMask", GetBoolValue(Instance()->DlssNrAutoMask.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ReversibleMode", GetIntValue(Instance()->DlssNrReversibleMode.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "EdgeGuardMode", GetIntValue(Instance()->DlssNrEdgeGuardMode.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "EdgeGuard", GetFloatValue(Instance()->DlssNrEdgeGuard.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "EdgeThreshold", GetFloatValue(Instance()->DlssNrEdgeThreshold.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "EdgeRadius", GetFloatValue(Instance()->DlssNrEdgeRadius.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ApplyModel", GetBoolValue(Instance()->DlssNrApplyModel.value_for_config()).c_str());
     ini.SetValue("DlssNr", "HoldFrame", GetBoolValue(Instance()->DlssNrHoldFrame.value_for_config()).c_str());
         ini.SetValue("DLSS", "RenderPresetOverride",
