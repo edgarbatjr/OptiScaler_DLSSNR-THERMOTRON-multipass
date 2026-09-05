@@ -164,6 +164,10 @@ using PFN_NrProbeFloat = void(__cdecl*) (void*, const char*, float, int);
 
 // One per back buffer, so an allocator is never reset while its frame is still in flight.
 
+// How many passes the model may run over one frame. Four is the lab's ceiling: the fork's own
+// note says re-feeding converges past three, so a fourth is an experiment, not a setting.
+constexpr unsigned int kNrMaxPasses = 4;
+
 struct NrState
 {
     HMODULE forwarder = nullptr;
@@ -197,17 +201,17 @@ struct NrState
     //
     // Indexed by pass, so [0] is unused and the first extra pass is [1]. Wasting one pointer keeps
     // every index here equal to the pass number it belongs to.
-    void* passFeature[4] = {};
+    void* passFeature[kNrMaxPasses + 1] = {};
 
     // Set on the frame a pass feature is created and cleared on the next. Creating and evaluating a
     // feature on the same command list is the hang that took multi-pass out (every crash died on a
     // creation frame), so a pass whose feature is fresh is skipped this frame and runs from the next --
     // the same one-frame-ahead rule the main feature follows.
-    bool passFeatureFresh[4] = {};
+    bool passFeatureFresh[kNrMaxPasses + 1] = {};
 
     // A pass feature's first evaluate tells it to forget a history it does not have yet -- the same
     // Reset the main feature gets on its first frame.
-    bool passNeedsReset[4] = {};
+    bool passNeedsReset[kNrMaxPasses + 1] = {};
 
     // The model cannot read and write one resource, so the frame is staged through these.
     ID3D12Resource* colorCopy = nullptr;
@@ -2198,9 +2202,9 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // Built here rather than beside the first because the pass count is a live setting: somebody who
     // never raises it never pays the memory, and somebody who lowers it gets it back.
     {
-        const unsigned int want = std::clamp(cfg.DlssNrPasses.value_or_default(), 1u, 3u);
+        const unsigned int want = std::clamp(cfg.DlssNrPasses.value_or_default(), 1u, kNrMaxPasses);
 
-        for (unsigned int i = 1; i < 4; ++i)
+        for (unsigned int i = 1; i <= kNrMaxPasses; ++i)
         {
             if (i < want && g_nr.passFeature[i] == nullptr && g_nr.feature != nullptr)
             {
@@ -2248,7 +2252,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // Guarded on the two descriptions matching, because CopyResource requires it and a mismatch is
     // the kind of thing that shows up as a device removal minutes later rather than as an error
     // here. If they ever diverge, this quietly runs one pass, which is the behaviour it replaced.
-    unsigned int passes = std::clamp(cfg.DlssNrPasses.value_or_default(), 1u, 3u);
+    unsigned int passes = std::clamp(cfg.DlssNrPasses.value_or_default(), 1u, kNrMaxPasses);
 
     if (passes > 1 && modelInput != nullptr)
     {
