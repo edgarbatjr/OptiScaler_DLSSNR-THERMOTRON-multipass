@@ -518,39 +518,41 @@ float EdgeFactor(float2 uv)
     const float r = max(gEdgeRadius * (float) vw / (float) max(gWidth, 1u), 1.0);
     const float thr = max(gEdgeThreshold, 1e-4);
 
-    float worst = 0.0;
-
     static const float2 kDirs[8] = {
         float2(1, 0), float2(-1, 0), float2(0, 1), float2(0, -1),
         float2(0.7071, 0.7071), float2(-0.7071, 0.7071), float2(0.7071, -0.7071), float2(-0.7071, -0.7071)
     };
 
+    // Five rings, each weighted by how far it is: a silhouette found on the nearest ring means this
+    // pixel sits right on it and takes the guard whole; one found only on the outer ring means the
+    // pixel is at the band's edge and takes half. The smallest ring that sees the jump is the
+    // distance to the silhouette, and taking the maximum of jump * weight picks exactly that ring,
+    // because the weights fall with the radius. The halo itself fades with distance from the edge,
+    // so the guard fades the same way instead of stopping dead at the radius.
+    static const float kRing[5] = { 0.0, 0.25, 0.5, 0.75, 1.0 };
+    static const float kWeight[5] = { 1.0, 1.0, 0.9, 0.75, 0.5 };
+
+    float guard = 0.0;
+
     [unroll]
-    for (int k = 0; k < 8; ++k)
+    for (int m = 0; m < 5; ++m)
     {
+        const float rr = m == 0 ? 1.0 : max(r * kRing[m], 1.0);
+        float worst = 0.0;
+
         [unroll]
-        for (int m = 0; m < 2; ++m)
+        for (int k = 0; k < 8; ++k)
         {
-            const float rr = m == 0 ? r : max(r * 0.5, 1.0);
             const int2 q = clamp(c + int2(round(kDirs[k] * rr)), int2(0, 0), int2((int) vw - 1, (int) vh - 1));
             float dn = gDepth.Load(int3(q, 0)).r;
             dn = gDepthInverted != 0 ? dn : 1.0 - dn;
             worst = max(worst, abs(d0 - dn) / max(max(d0, dn), 1e-6));
         }
+
+        guard = max(guard, smoothstep(thr, thr * 2.0, worst) * kWeight[m]);
     }
 
-    // The nearest texels as well, so a one-texel-wide feature -- a blade of grass, a strand of
-    // hair -- is not missed between the rings.
-    [unroll]
-    for (int k2 = 0; k2 < 4; ++k2)
-    {
-        const int2 q = clamp(c + int2(round(kDirs[k2])), int2(0, 0), int2((int) vw - 1, (int) vh - 1));
-        float dn = gDepth.Load(int3(q, 0)).r;
-        dn = gDepthInverted != 0 ? dn : 1.0 - dn;
-        worst = max(worst, abs(d0 - dn) / max(max(d0, dn), 1e-6));
-    }
-
-    return smoothstep(thr, thr * 2.0, worst);
+    return guard;
 }
 #endif
 

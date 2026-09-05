@@ -425,15 +425,17 @@ void RenderMenu(Config* config, float menuResScale)
             if (ImGui::SliderFloat("Edge band radius (px)", &edgeRadius, 1.0f, 24.0f, "%.0f"))
                 config->DlssNrEdgeRadius = edgeRadius;
 
-            HelpMarker("How far from the silhouette the band reaches, in output pixels. The halo is"
-                           "\nusually 3-8 pixels wide at 4K; widen it if a faint rim survives.");
+            HelpMarker("How far from the silhouette the band reaches, in output pixels. The guard is"
+                           "\nfull on the silhouette and fades to half at the radius, the way the halo"
+                           "\nitself fades. At 4K with three passes the halo runs 8-14 pixels; widen"
+                           "\nthe band if a faint rim survives, narrow it if fine foliage goes soft.");
 
             ImGui::SameLine();
             if (ImGui::SmallButton("Reset##edge"))
             {
-                config->DlssNrEdgeGuard = 0.8f;
+                config->DlssNrEdgeGuard = 1.0f;
                 config->DlssNrEdgeThreshold = 0.10f;
-                config->DlssNrEdgeRadius = 6.0f;
+                config->DlssNrEdgeRadius = 10.0f;
             }
         }
 

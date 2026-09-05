@@ -287,11 +287,11 @@ class Config
     // (the edit may not lift a pixel there), 3 luma lock (model's colour, frame's light).
     CustomOptional<uint32_t> DlssNrEdgeGuardMode { 0 };
     // How much of the guard lands inside the band (0..1).
-    CustomOptional<float> DlssNrEdgeGuard { 0.8f };
+    CustomOptional<float> DlssNrEdgeGuard { 1.0f };
     // Relative jump in 1/z that counts as a silhouette. 0.1 = the far side is 10% further.
     CustomOptional<float> DlssNrEdgeThreshold { 0.10f };
     // How far the band reaches from the silhouette, in output pixels.
-    CustomOptional<float> DlssNrEdgeRadius { 6.0f };
+    CustomOptional<float> DlssNrEdgeRadius { 10.0f };
 
     // Whether the model's edit is applied. Off keeps the pass running (so Hold frame works) but shows
     // the clean upscaler frame -- for A/B'ing NR on/off on a frozen frame. Default true.
