@@ -1144,6 +1144,25 @@ DXGI_FORMAT TypedGuideFormat(DXGI_FORMAT f)
 
 bool IsTypeless(DXGI_FORMAT f) { return TypedGuideFormat(f) != f; }
 
+// The view format for reading a depth buffer in a shader: the colour twin of its family. Typeless
+// depth goes through the same table the guide clones use; a typed colour format is its own view.
+DXGI_FORMAT DepthSrvFormat(DXGI_FORMAT f)
+{
+    switch (f)
+    {
+    case DXGI_FORMAT_D32_FLOAT:
+        return DXGI_FORMAT_R32_FLOAT;
+    case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    case DXGI_FORMAT_D16_UNORM:
+        return DXGI_FORMAT_R16_UNORM;
+    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+        return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+    default:
+        return TypedGuideFormat(f);
+    }
+}
+
 // Creates a typed twin of a guide buffer, matching everything but the format.
 ID3D12Resource* CreateGuideClone(ID3D12Device* device, ID3D12Resource* source)
 {
@@ -1451,17 +1470,47 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
     // Every slot in the table gets a view, whether the mode reads it or not. An unbound descriptor is
     // not an empty read; it is a read from nothing, and the source stands in wherever a mode has
     // nothing of its own to put there.
+    // The depth slot needs care the others do not. A game's depth buffer is usually a depth format --
+    // D32_FLOAT, D24_UNORM_S8_UINT -- and a shader resource view cannot be created in that format;
+    // it has to be the colour twin of the same family (R32_FLOAT, R24_UNORM_X8_TYPELESS). Asking for
+    // the depth format directly is an invalid view, and without the debug layer that is not an error
+    // return but a removed device: the first resolve of an Onimusha session, and the whole game with
+    // it. A depth that denies shader access at all cannot be read by anyone, so the source stands in
+    // and the guard is switched off for the pass rather than reading colour as depth.
+    DlssNrConstants constants = InConstants;
+    ID3D12Resource* depthSrv = nullptr;
+    DXGI_FORMAT depthFormat = DXGI_FORMAT_UNKNOWN;
+
+    if (InDepth != nullptr)
+    {
+        const D3D12_RESOURCE_DESC dd = InDepth->GetDesc();
+
+        if ((dd.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE) == 0)
+        {
+            depthSrv = InDepth;
+            depthFormat = DepthSrvFormat(dd.Format);
+        }
+    }
+
+    if (depthSrv == nullptr)
+        constants.EdgeGuardMode = 0;
+
     ID3D12Resource* const srvs[kSrvCount] = {
         InSource,
         InModel != nullptr ? InModel : InSource,
         InOriginal != nullptr ? InOriginal : InSource,
         InMotion != nullptr ? InMotion : InSource,
         InPrevEdit != nullptr ? InPrevEdit : InSource,
-        InDepth != nullptr ? InDepth : InSource,
+        depthSrv != nullptr ? depthSrv : InSource,
     };
 
     for (uint32_t i = 0; i < kSrvCount; ++i)
-        CreateShaderResourceView(_device, srvs[i], currentHeap.GetSrvCPU(i));
+    {
+        if (i == kSrvCount - 1 && depthSrv != nullptr)
+            CreateShaderResourceView(_device, srvs[i], currentHeap.GetSrvCPU(i), depthFormat);
+        else
+            CreateShaderResourceView(_device, srvs[i], currentHeap.GetSrvCPU(i));
+    }
 
     ID3D12Resource* const uavs[kUavCount] = {
         OutTarget,
@@ -1471,7 +1520,7 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
     for (uint32_t i = 0; i < kUavCount; ++i)
         CreateUnorderedAccessView(_device, uavs[i], currentHeap.GetUavCPU(i), 0);
 
-    if (!CreateConstantsBuffer(_device, _constantBuffers[slot], InConstants, currentHeap.GetCbvCPU(0)))
+    if (!CreateConstantsBuffer(_device, _constantBuffers[slot], constants, currentHeap.GetCbvCPU(0)))
     {
         LOG_ERROR("[{0}] Failed to create a constants buffer", _name);
         return false;
