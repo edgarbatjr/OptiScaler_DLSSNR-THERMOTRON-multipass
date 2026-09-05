@@ -281,6 +281,18 @@ class Config
     // replace. An in-game A/B and a way back. Default 0 = byte-identical to before.
     CustomOptional<uint32_t> DlssNrReversibleMode { 0 };
 
+    // Edge guard: the halo the model paints along silhouettes -- a lit rim on the background where a
+    // dark subject meets it -- compounds with every pass. Where the game's own depth jumps (the
+    // silhouette), the edit is held back. 0 off, 1 soften (blend back to the frame), 2 no brightening
+    // (the edit may not lift a pixel there), 3 luma lock (model's colour, frame's light).
+    CustomOptional<uint32_t> DlssNrEdgeGuardMode { 0 };
+    // How much of the guard lands inside the band (0..1).
+    CustomOptional<float> DlssNrEdgeGuard { 0.8f };
+    // Relative jump in 1/z that counts as a silhouette. 0.1 = the far side is 10% further.
+    CustomOptional<float> DlssNrEdgeThreshold { 0.10f };
+    // How far the band reaches from the silhouette, in output pixels.
+    CustomOptional<float> DlssNrEdgeRadius { 6.0f };
+
     // Whether the model's edit is applied. Off keeps the pass running (so Hold frame works) but shows
     // the clean upscaler frame -- for A/B'ing NR on/off on a frozen frame. Default true.
     CustomOptional<bool> DlssNrApplyModel { true };

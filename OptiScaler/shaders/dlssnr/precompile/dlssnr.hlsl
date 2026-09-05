@@ -29,6 +29,11 @@ cbuffer Params : register(b0)
     uint  gApplyModel;     // 0 output the clean frame (pass still runs), 1 apply the model's edit
     uint  gUseGameExposure;// D3D12 source-1 only: 1 = read the game's live exposure in-shader (t4)
     float gExposurePreMul; // preExposure * trim, so the live white point is gExposurePreMul / exposure
+    uint  gEdgeGuardMode;  // 0 off, 1 soften, 2 no brightening, 3 luma lock (D3D12 resolve only)
+    float gEdgeGuard;      // how much of the guard lands inside the band, 0..1
+    float gEdgeThreshold;  // relative jump in 1/z that counts as a silhouette
+    float gEdgeRadius;     // how far the band reaches from the silhouette, in output pixels
+    uint  gDepthInverted;  // 1 when the game's depth is reversed (near = 1)
 };
 
 // Bringing an impossible colour back into a possible one.
@@ -228,6 +233,12 @@ Texture2D<float4>   gMotion   : register(t3);  // resolve, accumulating: the gam
 // live path is compiled out under VK_MODE and gUseGameExposure is never set on that backend.
 #ifndef VK_MODE
 Texture2D<float4>   gExposure : register(t4);
+#endif
+
+// The game's own depth, at guide resolution, bound at t5 for the resolve's edge guard. D3D12 only:
+// Vulkan's descriptor set has no slot for it, and the guard is compiled out there.
+#ifndef VK_MODE
+Texture2D<float4>   gDepth    : register(t5);
 #endif
 #ifdef VK_MODE
 [[vk::binding(5, 0)]]
@@ -468,6 +479,80 @@ float3 CubeScaleResidual(float3 P, float3 T)
 
     return P + saturate(alpha) * d;
 }
+
+// The edge guard's band.
+//
+// The model paints a halo along silhouettes: where a dark subject meets a lighter background it
+// lifts the background's pixels in a rim a few pixels wide, and each pass paints over the last
+// pass's rim, so with three passes the rim is what the eye lands on. Nothing in the colour tells
+// the composition it is looking at a silhouette -- but the game's depth does, and the model was
+// handed that very buffer. Where depth jumps by more than a fraction of itself within the band's
+// reach, this pixel sits next to a silhouette and the guard fires.
+//
+// Compared in 1/z rather than raw depth. A reversed buffer already stores something proportional
+// to 1/z; a conventional one stores 1 - n/z, so 1 - d is used there. Either way a surface that is
+// continuous in space is continuous in the value, and a subject in front of a background that is
+// ten times further away differs by 90% -- so a threshold of a tenth is far from both.
+//
+// Eight directions at the full radius and at half of it, plus the four nearest texels: sixteen
+// taps and twenty loads, once per output pixel, which is nothing next to the model.
+#ifndef VK_MODE
+float EdgeFactor(float2 uv)
+{
+    uint gw, gh;
+    gDepth.GetDimensions(gw, gh);
+    if (gw == 0 || gh == 0)
+        return 0.0;
+
+    // The guide's valid region may be smaller than the texture that holds it.
+    const uint vw = gGuideWidth > 0 ? min(gGuideWidth, gw) : gw;
+    const uint vh = gGuideHeight > 0 ? min(gGuideHeight, gh) : gh;
+
+    const float2 p = uv * float2(vw, vh);
+    const int2 c = clamp(int2(p), int2(0, 0), int2((int) vw - 1, (int) vh - 1));
+
+    float d0 = gDepth.Load(int3(c, 0)).r;
+    d0 = gDepthInverted != 0 ? d0 : 1.0 - d0;
+
+    // The band's reach, in guide texels: the radius is stated in output pixels.
+    const float r = max(gEdgeRadius * (float) vw / (float) max(gWidth, 1u), 1.0);
+    const float thr = max(gEdgeThreshold, 1e-4);
+
+    float worst = 0.0;
+
+    static const float2 kDirs[8] = {
+        float2(1, 0), float2(-1, 0), float2(0, 1), float2(0, -1),
+        float2(0.7071, 0.7071), float2(-0.7071, 0.7071), float2(0.7071, -0.7071), float2(-0.7071, -0.7071)
+    };
+
+    [unroll]
+    for (int k = 0; k < 8; ++k)
+    {
+        [unroll]
+        for (int m = 0; m < 2; ++m)
+        {
+            const float rr = m == 0 ? r : max(r * 0.5, 1.0);
+            const int2 q = clamp(c + int2(round(kDirs[k] * rr)), int2(0, 0), int2((int) vw - 1, (int) vh - 1));
+            float dn = gDepth.Load(int3(q, 0)).r;
+            dn = gDepthInverted != 0 ? dn : 1.0 - dn;
+            worst = max(worst, abs(d0 - dn) / max(max(d0, dn), 1e-6));
+        }
+    }
+
+    // The nearest texels as well, so a one-texel-wide feature -- a blade of grass, a strand of
+    // hair -- is not missed between the rings.
+    [unroll]
+    for (int k2 = 0; k2 < 4; ++k2)
+    {
+        const int2 q = clamp(c + int2(round(kDirs[k2])), int2(0, 0), int2((int) vw - 1, (int) vh - 1));
+        float dn = gDepth.Load(int3(q, 0)).r;
+        dn = gDepthInverted != 0 ? dn : 1.0 - dn;
+        worst = max(worst, abs(d0 - dn) / max(max(d0, dn), 1e-6));
+    }
+
+    return smoothstep(thr, thr * 2.0, worst);
+}
+#endif
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
@@ -987,6 +1072,41 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         result = gPassthrough != 0 ? modelDirect : NeutwoDecode(modelDirect);
     else if (gReversibleMode == 4)
         result = gPassthrough != 0 ? modelDirect : HybridDecode(modelDirect);
+
+    // The edge guard. Inside the band next to a silhouette the edit is held back: soften blends the
+    // result toward the frame; no brightening lets the edit darken but never lift a pixel there,
+    // which is what the halo is; luma lock keeps the model's colour and the frame's light. Applied
+    // to the replace modes as well, which have no other guard at all. Mode 0 touches nothing.
+#ifndef VK_MODE
+    if (gDebugView == 4)
+    {
+        // The band itself, white where the guard would fire at full strength, whatever the mode.
+        const float band = EdgeFactor(cmpUv) * gDebugScale;
+        gTarget[id.xy] = float4(band, band, band, originalSample.a);
+        return;
+    }
+
+    if (gEdgeGuardMode != 0)
+    {
+        const float e = EdgeFactor(cmpUv) * saturate(gEdgeGuard);
+
+        if (e > 0.0)
+        {
+            const float rl = dot(result, kLuma);
+            const float ol = originalLuma;
+
+            if (gEdgeGuardMode == 1)
+                result = lerp(result, original, e);
+            else if (gEdgeGuardMode == 2)
+            {
+                if (rl > ol)
+                    result *= lerp(1.0, (ol + 1e-6) / (rl + 1e-6), e);
+            }
+            else
+                result *= lerp(1.0, (ol + 1e-6) / (rl + 1e-6), e);
+        }
+    }
+#endif
 
     // Back out of the normalised space the composition worked in.
     result *= normScale;

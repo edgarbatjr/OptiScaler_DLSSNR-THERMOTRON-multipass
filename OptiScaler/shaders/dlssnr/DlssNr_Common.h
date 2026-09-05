@@ -180,6 +180,14 @@ struct alignas(256) DlssNrConstants
     // preExposure * trim, so the live white point is ExposurePreMul / exposure. Mirrored in the cbuffer.
     uint32_t UseGameExposure;
     float ExposurePreMul;
+
+    // The edge guard (D3D12 resolve only; the game's depth is bound at t5). Trailing scalars, mirrored
+    // in the shader cbuffer. EdgeGuardMode 0 leaves the pass bit-identical.
+    uint32_t EdgeGuardMode;
+    float EdgeGuard;
+    float EdgeThreshold;
+    float EdgeRadius;
+    uint32_t DepthInverted;
 };
 
 class DlssNr_Common
