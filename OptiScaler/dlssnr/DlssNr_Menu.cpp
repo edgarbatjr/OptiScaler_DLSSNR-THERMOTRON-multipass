@@ -224,43 +224,6 @@ void RenderMenu(Config* config, float menuResScale)
                            "\n\nIf the model is running below frame size, extra passes need its"
                            "\ninput and output to match; where they do not, this quietly runs"
                            "\none and says so in the log.");
-
-            // How big the passes after the first run. Committed on release, like the model
-            // resolution below: every distinct value rebuilds the pass features and their surfaces.
-            if (passes > 1)
-            {
-                static int pendingRefine = -1;
-
-                int refinePercent = pendingRefine >= 0
-                                        ? pendingRefine
-                                        : (int) lroundf(config->DlssNrRefineScale.value_or_default() * 100.0f);
-
-                if (ImGui::SliderInt("Refine passes at", &refinePercent, 25, 100, "%d%% of the first"))
-                    pendingRefine = refinePercent;
-
-                if (ImGui::IsItemDeactivatedAfterEdit() && pendingRefine >= 0)
-                {
-                    config->DlssNrRefineScale = std::clamp(pendingRefine, 25, 100) / 100.0f;
-                    pendingRefine = -1;
-                }
-
-                HelpMarker("The size the passes after the first run at, as a fraction of the"
-                           "\nfirst pass's size. 100% runs every pass at the same size, as before."
-                           "\n\nBelow 100% the first pass keeps its size and its detail; the later"
-                           "\npasses are shown a shrink of its answer, refine that, and only what"
-                           "\nthey ADDED is enlarged back onto the first pass's answer. Cost of a"
-                           "\nrefine pass scales with the area: 70% is about half a full pass,"
-                           "\n50% a quarter."
-                           "\n\nWhat it trades: the refinement's own grain is made at the smaller"
-                           "\nsize, so the finest of what passes 2 and 3 add comes back a little"
-                           "\nsofter than at 100%. Compare with Hold frame.");
-
-                if (refinePercent < 100)
-                {
-                    const float area = (refinePercent / 100.0f) * (refinePercent / 100.0f);
-                    ImGui::TextDisabled("Cost ~ %.2f model runs instead of %d", 1.0f + (passes - 1) * area, passes);
-                }
-            }
         }
 
         // Any percentage, rather than a handful of steps somebody chose in advance. The lower bound

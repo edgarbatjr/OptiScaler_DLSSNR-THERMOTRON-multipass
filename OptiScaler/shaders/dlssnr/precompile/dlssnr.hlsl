@@ -585,27 +585,6 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    // Refine residual (mode 5): the extra passes ran at a smaller size than the first, and only what
-    // they ADDED comes back up. gSource is the first pass's answer shrunk to the refine size (what
-    // the refine passes were shown), gModel is what they returned, gOriginal is the first pass's
-    // answer at its own size and gTarget is where the sum goes. Both small pictures are enlarged the
-    // same way, so the shrink's blur cancels and the only thing laid on the full-size answer is the
-    // refinement itself -- the full-size detail the first pass made is never replaced by a softer
-    // copy of itself.
-    //
-    // gTransferStrength is the gain on the residual: 1 adds the refinement as the model made it.
-    // The target is a separate surface rather than the answer itself: reading a typed UAV back is a
-    // format capability, reading an SRV is not.
-    if (gMode == 5)
-    {
-        const float3 refined = gModel.SampleLevel(gLinear, uv, 0).rgb;
-        const float3 shown = gSource.SampleLevel(gLinear, uv, 0).rgb;
-        float4 answer = gOriginal.Load(int3(id.xy, 0));
-        answer.rgb = max(answer.rgb + (refined - shown) * gTransferStrength, 0.0);
-        gTarget[id.xy] = answer;
-        return;
-    }
-
     if (gMode == 2)
     {
         uint srcW, srcH;
