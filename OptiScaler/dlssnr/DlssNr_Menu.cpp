@@ -180,6 +180,131 @@ void RenderMenu(Config* config, float menuResScale)
 
         ImGui::SeparatorText("Cost");
 
+        // Presets for the three cost controls below -- how many passes, what raster each runs at,
+        // and how hard each pushes. They deliberately leave the model's look alone: style,
+        // intensity, skin and tone are taste, and a preset that overwrote them would throw away
+        // whatever the player had already settled on.
+        //
+        // The costs come from measurement, not from guessing. Fitted on an RTX 5090 at 4K in The
+        // Blood of Dawnwalker, six configurations, the last two of them predicted before they were
+        // run and correct to within 0.15 ms:
+        //
+        //   ms = 0.43 + 0.92 * passes + 5.85 * (sum of the passes' areas) + 0.18 * (reduced passes)
+        //
+        // The 0.92 is the part worth knowing: every pass carries that much no matter how small its
+        // raster, so a pass has a floor of about 1.1 ms and cannot be made free by shrinking it.
+        //
+        // What the ladder actually buys, measured the same way: dropping a later pass's resolution
+        // costs fine texture and buys shaping. Two full passes beat three laddered ones on surface
+        // detail at the same price. So the presets keep resolution full wherever the budget allows
+        // and spend what is left on an extra reduced pass, which is the cheap way to add volume.
+        {
+            struct NrCostPreset
+            {
+                const char* name;
+                unsigned int passes;
+                float scale[3]; // passes 2, 3, 4
+                float decay[3];
+                const char* tip;
+            };
+
+            static const NrCostPreset kNrCostPresets[] = {
+                { "Performance",
+                  2,
+                  { 1.0f, 1.0f, 1.0f },
+                  { 1.00f, 1.00f, 1.00f },
+                  "Two passes, both full size.\n\nThe best detail per millisecond of the four: in"
+                  "\ntesting it kept 86% of the fine surface detail of three full passes for two"
+                  "\nthirds of the cost, and beat a three-pass ladder of the same price on both"
+                  "\ncounts at once." },
+                { "Balanced",
+                  3,
+                  { 1.0f, 0.5f, 1.0f },
+                  { 1.00f, 0.70f, 1.00f },
+                  "Two full passes for the texture, a third at half size for the shaping.\n\nThe"
+                  "\nthird pass is where volume and depth come from, and shaping survives a small"
+                  "\nraster -- which is what makes it cheap." },
+                { "Quality",
+                  4,
+                  { 1.0f, 1.0f, 0.5f },
+                  { 1.00f, 0.80f, 0.60f },
+                  "Three full passes, then a fourth at half size.\n\nAll the texture the model has"
+                  "\nto give, plus one more layer of shaping for a little over two milliseconds." },
+                { "Photo",
+                  4,
+                  { 1.0f, 1.0f, 1.0f },
+                  { 1.00f, 0.85f, 0.70f },
+                  "Four passes, all full size, and the later ones held back less than the other"
+                  "\npresets hold them.\n\nThat restraint exists to protect motion. On a still it"
+                  "\nonly costs you shaping, so this preset spends it. Not meant for playing." },
+            };
+
+            const auto nrPresetActive = [&](const NrCostPreset& p)
+            {
+                const auto closeTo = [](float a, float b) { return a > b - 0.005f && a < b + 0.005f; };
+                if ((unsigned int) config->DlssNrPasses.value_or_default() != p.passes)
+                    return false;
+                return closeTo(config->DlssNrPassScale2.value_or_default(), p.scale[0]) &&
+                       closeTo(config->DlssNrPassScale3.value_or_default(), p.scale[1]) &&
+                       closeTo(config->DlssNrPassScale4.value_or_default(), p.scale[2]) &&
+                       closeTo(config->DlssNrPassDecay2.value_or_default(), p.decay[0]) &&
+                       closeTo(config->DlssNrPassDecay3.value_or_default(), p.decay[1]) &&
+                       closeTo(config->DlssNrPassDecay4.value_or_default(), p.decay[2]);
+            };
+
+            bool anyActive = false;
+
+            for (size_t i = 0; i < IM_ARRAYSIZE(kNrCostPresets); ++i)
+            {
+                const NrCostPreset& p = kNrCostPresets[i];
+                const bool active = nrPresetActive(p);
+                anyActive = anyActive || active;
+
+                if (i > 0)
+                    ImGui::SameLine();
+
+                if (active)
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.42f, 0.72f, 1.0f));
+
+                if (ImGui::Button(p.name))
+                {
+                    config->DlssNrPasses = p.passes;
+                    config->DlssNrPassScale2 = p.scale[0];
+                    config->DlssNrPassScale3 = p.scale[1];
+                    config->DlssNrPassScale4 = p.scale[2];
+                    config->DlssNrPassDecay2 = p.decay[0];
+                    config->DlssNrPassDecay3 = p.decay[1];
+                    config->DlssNrPassDecay4 = p.decay[2];
+                }
+
+                if (active)
+                    ImGui::PopStyleColor();
+
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", p.tip);
+            }
+
+            ImGui::SameLine();
+            HelpMarker("Starting points for the three controls below, and only those three: how"
+                       "\nmany passes, what size each runs at, and how hard each pushes. Your"
+                       "\nstyle, intensity, skin and tone are left exactly as you set them."
+                       "\n\nThe highlighted one is what the sliders currently match; move any of"
+                       "\nthem and no preset is highlighted, which is fine -- they are a place to"
+                       "\nstart, not a place to stay."
+                       "\n\nThe costs behind them were measured, not guessed. On an RTX 5090 at 4K"
+                       "\nthe pass time follows ms = 0.43 + 0.92 x passes + 5.85 x (sum of the"
+                       "\npasses' areas) + 0.18 x (reduced passes), fitted on six configurations."
+                       "\nYour own numbers will differ; the shape of it should not.");
+
+            if (!anyActive)
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(custom)");
+            }
+
+            ImGui::Spacing();
+        }
+
         {
             // Coloured by what it costs, because the number alone does not say. The model is 98% of
             // this pass's expense and every run pays it again, so the scale is linear and brutal:
