@@ -180,6 +180,35 @@ void RenderMenu(Config* config, float menuResScale)
 
         ImGui::SeparatorText("Cost");
 
+        // Where the model runs. The largest cost lever there is, and the only one that changes what
+        // the model is shown rather than how much of it there is.
+        {
+            static const char* nrPlacementNames[] = { "After the upscaler", "Before the upscaler" };
+            int placement = (int) config->DlssNrPlacement.value_or_default();
+
+            if (placement < 0 || placement > 1)
+                placement = 0;
+
+            if (ImGui::Combo("Model runs", &placement, nrPlacementNames, IM_ARRAYSIZE(nrPlacementNames)))
+                config->DlssNrPlacement = (uint32_t) placement;
+
+            HelpMarker("After: the model sees the finished frame at display resolution and synthesises"
+                       "\ndetail at that resolution. What every release so far has done."
+                       "\n\nBefore: the model sees the game's own frame at render resolution and the"
+                       "\nupscaler then reconstructs from an enhanced input. Cost falls with the square"
+                       "\nof the render scale -- at DLSS Performance, about a quarter."
+                       "\n\nNot free: detail made at render resolution is render-resolution detail, and"
+                       "\nthe upscaler enlarges it. Which is better is not settled. Measure it."
+                       "\n\nChanging this resizes the model, so the picture pops for a couple of frames.");
+
+            if (placement == 1)
+                ImGui::TextDisabled("Model works at the game's render resolution. Direct3D 12 games\n"
+                                    "only -- the D3D11 and Vulkan bridges have no seam before the\n"
+                                    "upscaler and keep running after it.");
+        }
+
+        ImGui::Spacing();
+
         // Presets for the three cost controls below -- how many passes, what raster each runs at,
         // and how hard each pushes. They deliberately leave the model's look alone: style,
         // intensity, skin and tone are taste, and a preset that overwrote them would throw away

@@ -312,6 +312,27 @@ class Config
     CustomOptional<float> DlssNrPassScale3 { 1.0f };
     CustomOptional<float> DlssNrPassScale4 { 1.0f };
 
+    // Where in the frame the model runs.
+    //
+    // 0 -- after the upscaler, over Output. The model sees the finished display-resolution frame and
+    //      synthesises detail at that resolution. What every release so far has done.
+    //
+    // 1 -- before the upscaler, over Colour. The model sees the game's own render-resolution frame and
+    //      the upscaler then reconstructs from an already-enhanced input. The model's area falls with
+    //      the render scale, so at DLSS Performance it costs about a quarter of what it costs after --
+    //      the single largest cost lever there is, and the one that puts this within reach of a card
+    //      that cannot afford a display-resolution pass.
+    //
+    // Not a free win: detail synthesised at render resolution is render-resolution detail, and the
+    // upscaler enlarges it. Measured, resolution buys texture. Against that, the guides arrive at the
+    // model's own resolution instead of being scaled to the output, and the upscaler reconstructs
+    // temporally rather than stretching. Which wins is an open question -- hence a switch, not a
+    // replacement.
+    //
+    // Changing it resizes the model, so the feature is rebuilt: the picture pops for a couple of
+    // frames, exactly as a resolution change does.
+    CustomOptional<uint32_t> DlssNrPlacement { 0 };
+
     // Whether the model's edit is applied. Off keeps the pass running (so Hold frame works) but shows
     // the clean upscaler frame -- for A/B'ing NR on/off on a frozen frame. Default true.
     CustomOptional<bool> DlssNrApplyModel { true };

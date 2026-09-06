@@ -33,6 +33,25 @@ namespace DlssNr
 void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
                           ID3D12CommandQueue* timingQueue = nullptr);
 
+// The same pass, run on the upscaler's INPUT instead of its output, before the upscaler has read it.
+//
+// Everything the pass needs is already in this parameter block at this point -- depth, motion vectors,
+// the create flags, the subrect dimensions -- and the only thing that changes is which texture is the
+// frame: Colour rather than Output. Colour is at the game's render resolution, so the model is built at
+// that size and costs the square of the render scale: at DLSS Performance, a quarter of what the same
+// pass costs after the upscaler.
+//
+// What it trades away is that the detail is synthesised at render resolution and the upscaler then
+// enlarges it. Which side of that trade is better is not settled, so both entry points exist and
+// [DlssNr] Placement picks one. Exactly one runs per frame -- running both would show the model its
+// own work.
+void EvaluateBeforeUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
+                           ID3D12CommandQueue* timingQueue = nullptr);
+
+// Whether the configured placement is "before the upscaler". For the call sites, which have to choose
+// before the upscaler runs and again after it returns.
+bool RunsBeforeUpscale();
+
 
 
 // Frame generation titles tag their UI layer through Streamline; a copy of it makes the HUD mask

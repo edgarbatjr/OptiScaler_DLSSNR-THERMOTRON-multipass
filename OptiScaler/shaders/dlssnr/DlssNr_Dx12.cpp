@@ -2993,8 +2993,17 @@ void RetryAfterFailure()
 // This is the call site's job, not the pass's. A caller that has the resources in hand -- a
 // reprojection stage, a frame generation path, anything that is not the upscaler seam -- calls
 // RunPass directly and never touches an NGX parameter block.
-void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
-                          ID3D12CommandQueue* timingQueue)
+bool RunsBeforeUpscale() { return Config::Instance()->DlssNrPlacement.value_or_default() == 1u; }
+
+// Both placements, in one body.
+//
+// The two differ in exactly one line -- which texture in the parameter block is the frame -- and
+// everything else that is read here (depth, motion vectors, the create flags, the subrect dimensions,
+// the exposure the game declares) is the same block at both moments. Writing it twice would be two
+// copies of two hundred lines that have to stay identical, and the first fix applied to one and not
+// the other would be a bug nobody could see.
+static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
+                                ID3D12CommandQueue* timingQueue, bool beforeUpscale)
 {
     if (!Config::Instance()->DlssNrEnabled.value_or_default())
     {
@@ -3016,16 +3025,25 @@ void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Paramete
     // model twice -- but "nothing needed adding" is a claim, and this is the line that checks it.
     {
         static ApiUpscalerInput saidApi = (ApiUpscalerInput) -1;
+        static int saidPlacement = -1;
         const ApiUpscalerInput api = State::Instance().currentInputApiName;
+        const int placement = beforeUpscale ? 1 : 0;
 
-        if (saidApi != api)
+        if (saidApi != api || saidPlacement != placement)
         {
             saidApi = api;
-            LOG_INFO("DLSS-NR reached through the game's {} input", ApiUpscalerInputName(api));
+            saidPlacement = placement;
+            LOG_INFO("DLSS-NR reached through the game's {} input, running {} the upscaler",
+                     ApiUpscalerInputName(api), beforeUpscale ? "BEFORE" : "after");
         }
     }
 
-    ID3D12Resource* target = GetResource(params, NVSDK_NGX_Parameter_Output, "DLSSD.Output");
+    // The frame. After the upscaler that is Output, at display resolution; before it, Colour, at the
+    // game's render resolution. The pass writes back into whichever it was given, as it always has --
+    // before the upscaler that means the upscaler reads an enhanced frame, which is the entire point.
+    ID3D12Resource* target = beforeUpscale
+                                 ? GetResource(params, NVSDK_NGX_Parameter_Color, "DLSSD.Color")
+                                 : GetResource(params, NVSDK_NGX_Parameter_Output, "DLSSD.Output");
     ID3D12Resource* depth = GetResource(params, NVSDK_NGX_Parameter_Depth, "DLSSD.Depth");
     ID3D12Resource* motion = GetResource(params, NVSDK_NGX_Parameter_MotionVectors, "DLSSD.MotionVectors");
 
@@ -3033,7 +3051,8 @@ void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Paramete
     // carry none of it -- so it stays quiet and tries again next frame.
     if (target == nullptr || depth == nullptr || motion == nullptr)
     {
-        ReportSkipOnce(target == nullptr    ? "the parameters carried no output texture"
+        ReportSkipOnce(target == nullptr    ? (beforeUpscale ? "the parameters carried no colour texture"
+                                                             : "the parameters carried no output texture")
                        : depth == nullptr   ? "the parameters carried no depth"
                                             : "the parameters carried no motion vectors");
         return;
@@ -3195,6 +3214,27 @@ void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Paramete
     }
 
     g_compose->Dispatch(cmdList, target, depth, motion, target, frame, timingQueue);
+}
+
+// The after call does NOT check the setting, on purpose.
+//
+// Two of its four call sites are the D3D11-on-D3D12 and Vulkan-on-D3D12 bridges, which have no
+// before-the-upscaler seam to offer: gating here would turn Neural Rendering silently off for those
+// games the moment someone picked "before" in the menu, with nothing in the log to say why. So the
+// choice is made at the native D3D12 seam, which is the only place that can honour both.
+void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
+                          ID3D12CommandQueue* timingQueue)
+{
+    EvaluateAtPlacement(cmdList, params, timingQueue, false);
+}
+
+void EvaluateBeforeUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
+                           ID3D12CommandQueue* timingQueue)
+{
+    if (!RunsBeforeUpscale())
+        return;
+
+    EvaluateAtPlacement(cmdList, params, timingQueue, true);
 }
 
 // The pass. Resources in, nothing read from anywhere the caller cannot see.
