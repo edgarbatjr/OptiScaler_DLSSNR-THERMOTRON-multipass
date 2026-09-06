@@ -2995,6 +2995,44 @@ void RetryAfterFailure()
 // RunPass directly and never touches an NGX parameter block.
 bool RunsBeforeUpscale() { return Config::Instance()->DlssNrPlacement.value_or_default() == 1u; }
 
+// Where the pass writes when it runs before the upscaler.
+//
+// Not the game's own colour buffer, which is what the first attempt did and what crashed inside the
+// model. Two reasons, either of them fatal on its own:
+//
+//   Format. Every surface this pass allocates is created in the target's format, and the upscaler's
+//   INPUT in this engine is R11G11B10_FLOAT -- three channels, packed, no alpha. The model's output
+//   surface was therefore built as R11G11B10 and the snippet threw a C++ exception seven frames deep
+//   (0xE06D7363) the moment it was handed one. The output side, R16G16B16A16_FLOAT, is what it takes.
+//
+//   Ownership. The upscaler's input belongs to the game and is handed over to be READ. Nothing says
+//   it was created with ALLOW_UNORDERED_ACCESS, and this pass writes its result as a UAV.
+//
+// So the pass reads the game's buffer and writes ours, and the parameter block is then pointed at
+// ours for that one evaluate, which is how the upscaler ends up reading an enhanced frame without a
+// single byte of the game's memory being written. The upscaler is handed a different texture, which
+// it was always free to be.
+static ID3D12Resource* g_beforeOut = nullptr;
+static unsigned int g_beforeW = 0;
+static unsigned int g_beforeH = 0;
+
+// Ours alternates between being written by this pass and read by the upscaler, so it alternates
+// state. False right after creation, when CreateScratch has already left it in UNORDERED_ACCESS.
+static bool g_beforeOutIsRead = false;
+
+void ReleaseBeforeSurface()
+{
+    if (g_beforeOut != nullptr)
+    {
+        g_beforeOut->Release();
+        g_beforeOut = nullptr;
+    }
+
+    g_beforeW = 0;
+    g_beforeH = 0;
+    g_beforeOutIsRead = false;
+}
+
 // Both placements, in one body.
 //
 // The two differ in exactly one line -- which texture in the parameter block is the frame -- and
@@ -3205,6 +3243,36 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
     if (g_compose == nullptr)
         g_compose = std::make_unique<DlssNr_Dx12>("Neural Rendering", device);
 
+    // Before the upscaler the destination is ours, in a format the model accepts, at the size of the
+    // frame the game actually rendered. Everything downstream keys off the destination's desc, so
+    // this one choice also decides the format of every scratch surface and the size the model is
+    // built at -- which is the whole point of running here.
+    if (beforeUpscale && g_compose != nullptr)
+    {
+        const D3D12_RESOURCE_DESC colourDesc = target->GetDesc();
+        const auto w = (unsigned int) colourDesc.Width;
+        const auto h = (unsigned int) colourDesc.Height;
+
+        if (g_beforeOut != nullptr && (g_beforeW != w || g_beforeH != h))
+        {
+            LOG_INFO("DLSS-NR before-upscale surface resized: {}x{} -> {}x{}", g_beforeW, g_beforeH, w, h);
+            ReleaseBeforeSurface();
+        }
+
+        if (g_beforeOut == nullptr && w > 0 && h > 0)
+        {
+            g_beforeOut = CreateScratch(device, DXGI_FORMAT_R16G16B16A16_FLOAT, w, h);
+            g_beforeW = w;
+            g_beforeH = h;
+            g_beforeOutIsRead = false;
+
+            if (g_beforeOut != nullptr)
+                LOG_INFO("DLSS-NR before-upscale surface: {}x{} R16G16B16A16_FLOAT (the game's own is "
+                         "format {}, which the model does not take and does not belong to us anyway)",
+                         w, h, (int) colourDesc.Format);
+        }
+    }
+
     device->Release();
 
     if (g_compose == nullptr)
@@ -3213,7 +3281,40 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
         return;
     }
 
-    g_compose->Dispatch(cmdList, target, depth, motion, target, frame, timingQueue);
+    if (!beforeUpscale)
+    {
+        g_compose->Dispatch(cmdList, target, depth, motion, target, frame, timingQueue);
+        return;
+    }
+
+    if (g_beforeOut == nullptr)
+    {
+        ReportSkipOnce("the before-upscale destination could not be created");
+        return;
+    }
+
+    // Back to writable. The upscaler read it as a shader resource last frame.
+    if (g_beforeOutIsRead)
+    {
+        Barrier(cmdList, g_beforeOut, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        g_beforeOutIsRead = false;
+    }
+
+    g_compose->Dispatch(cmdList, target, depth, motion, g_beforeOut, frame, timingQueue);
+
+    // Readable, and then handed over. The upscaler is about to run on this same list.
+    Barrier(cmdList, g_beforeOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    g_beforeOutIsRead = true;
+
+    // The swap. Typed, because that is how a game sets it and how the upscaler reads it.
+    //
+    // Not restored afterwards, following IFeature_VkwDx12, which does the same for the same reason:
+    // the game writes this parameter fresh every frame before it calls evaluate, so there is nothing
+    // to restore it for, and a restore would have to run after the upscaler on a path that returns
+    // straight to the game.
+    params->Set(NVSDK_NGX_Parameter_Color, g_beforeOut);
 }
 
 // The after call does NOT check the setting, on purpose.
@@ -3406,6 +3507,8 @@ bool CaptureInProgress() { return g_capture.isActive(); }
 void Shutdown()
 {
     std::lock_guard<std::mutex> nrLock(g_nrMutex);
+
+    ReleaseBeforeSurface();
 
     for (auto& r : g_nrRetired)
     {
