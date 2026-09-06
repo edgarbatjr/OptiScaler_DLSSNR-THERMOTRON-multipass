@@ -292,6 +292,20 @@ class Config
     CustomOptional<float> DlssNrEdgeThreshold { 0.10f };
     // How far the band reaches from the silhouette, in output pixels.
     CustomOptional<float> DlssNrEdgeRadius { 10.0f };
+    // Colour guard: the most the result's chroma may differ from the frame's, as a ratio. 2.0 lets a
+    // pixel's colour be twice as far from grey, or half, before it is held.
+    //
+    // Every other guard in this pass bounds light. The highlight guard caps brightening; nothing caps
+    // how far the hue and saturation may move, and with several passes each recolours the last one's
+    // work. On skin -- the strongest structure the model applies, on something already reddish -- that
+    // ends at magenta: faces a few pixels across go pink, worse with every pass, fine once they are
+    // close. Seen in two engines, so it is the model's colour path rather than one game's buffer.
+    //
+    // Split into light and colour, bound only the colour, put the same light back: every bit of
+    // structure is luminance and survives untouched. Below 1.0 the guard does not run at all and the
+    // pass is bit-identical to before it existed, which is the default -- nobody's picture changes
+    // unless they ask for it.
+    CustomOptional<float> DlssNrChromaGuard { 0.0f };
     // Detail-only modes: also lock the low-frequency luminance BETWEEN passes, so pass N+1 is shown a
     // frame without pass N's glow and the halo does not compound with the pass count.
     CustomOptional<bool> DlssNrEdgeBetweenPasses { true };

@@ -2761,6 +2761,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         resolveParams.EdgeGuard = cfg.DlssNrEdgeGuard.value_or_default();
         resolveParams.EdgeThreshold = cfg.DlssNrEdgeThreshold.value_or_default();
         resolveParams.EdgeRadius = cfg.DlssNrEdgeRadius.value_or_default();
+        resolveParams.ChromaGuard = cfg.DlssNrChromaGuard.value_or_default();
         resolveParams.DepthInverted = g_nr.guideDepthInverted ? 1u : 0u;
         resolveParams.ReversibleMode = cfg.DlssNrReversibleMode.value_or_default();
         resolveParams.ApplyModel = cfg.DlssNrApplyModel.value_or_default() ? 1u : 0u;

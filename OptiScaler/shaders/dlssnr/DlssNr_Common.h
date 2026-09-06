@@ -193,6 +193,18 @@ struct alignas(256) DlssNrConstants
     float EdgeThreshold;
     float EdgeRadius;
     uint32_t DepthInverted;
+
+    // The colour guard: how far the result's chroma may travel from the frame's, as a ratio.
+    //
+    // The highlight guard bounds how much brighter a pixel may get and nothing bounds how much its
+    // COLOUR may move, so a pixel can sit against the brightness ceiling while its hue walks off.
+    // That is the magenta on skin: faces far enough away to be a few pixels across, worse with every
+    // pass, gone as they come closer -- reported in two games, so it is the model's colour path and
+    // not one engine's buffer.
+    //
+    // Below 1.0 the guard does not run and the pass is bit-identical to before it existed. Mirrored
+    // last in the shader cbuffer.
+    float ChromaGuard;
 };
 
 class DlssNr_Common

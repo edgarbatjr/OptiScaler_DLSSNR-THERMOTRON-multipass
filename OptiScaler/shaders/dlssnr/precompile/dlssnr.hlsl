@@ -34,6 +34,7 @@ cbuffer Params : register(b0)
     float gEdgeThreshold;  // relative jump in 1/z that counts as a silhouette
     float gEdgeRadius;     // how far the band reaches from the silhouette, in output pixels
     uint  gDepthInverted;  // 1 when the game's depth is reversed (near = 1)
+    float gChromaGuard;    // how far the chroma may travel from the frame's, as a ratio; <1 = off
 };
 
 // Bringing an impossible colour back into a possible one.
@@ -1236,10 +1237,46 @@ void CSMain(uint3 id : SV_DispatchThreadID)
                     result *= lerp(1.0, (ol + 1e-6) / (rl + 1e-6), e);
             }
             else
-                result *= lerp(1.0, (ol + 1e-6) / (rl + 1e-6), e);
+            {
+                // Luma lock, bounded. Unbounded it is a divide by the model's own luminance, and
+                // where that goes small the ratio runs away and multiplies the whole colour: the
+                // magenta hands. Mode 4 above already meets this exact hazard and answers it with
+                // clamp(k, 1/3, 3) -- "a wrong block near a hard edge cannot swing a pixel more
+                // than 3x either way". The same bound, for the same reason.
+                const float g = clamp((ol + 1e-6) / (rl + 1e-6), 1.0 / 3.0, 3.0);
+                result *= lerp(1.0, g, e);
+            }
         }
     }
 #endif
+
+    // The colour guard.
+    //
+    // Everything above bounds LIGHT. The highlight guard caps how much brighter a pixel may get, the
+    // edge guard holds the edit back along silhouettes, and both work on luminance. Nothing bounds
+    // how far the COLOUR may move, and with several passes each one recolours what the last one
+    // recoloured. On skin -- which carries the strongest structure the model applies, and which is
+    // reddish to begin with -- that walk ends at magenta.
+    //
+    // Split the result into its light and its colour, bound only the colour against the frame's, and
+    // put the same light back. `rl` leaves and returns untouched, so every bit of structure the model
+    // synthesised -- the pore, the crease, the shaping, all of it luminance -- survives exactly. Only
+    // how far the hue and saturation may travel is limited.
+    if (gChromaGuard >= 1.0)
+    {
+        const float rl = dot(result, kLuma);
+        const float ol = dot(original, kLuma);
+
+        if (rl > 1e-4 && ol > 1e-4)
+        {
+            const float3 rc = result / rl;     // the colour, with the light divided out
+            const float3 oc = original / ol;
+
+            const float3 bounded = clamp(rc, oc / gChromaGuard, oc * gChromaGuard);
+
+            result = bounded * rl;             // the model's own light, put back untouched
+        }
+    }
 
     // Back out of the normalised space the composition worked in.
     result *= normScale;

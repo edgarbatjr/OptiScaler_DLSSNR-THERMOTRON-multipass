@@ -694,6 +694,35 @@ void RenderMenu(Config* config, float menuResScale)
             }
         }
 
+        // The colour guard. Not inside the edge guard's block: it has nothing to do with silhouettes
+        // or with depth, and it is the only guard here that bounds colour rather than light.
+        {
+            float chroma = config->DlssNrChromaGuard.value_or_default();
+
+            if (ImGui::SliderFloat("Colour guard", &chroma, 0.0f, 4.0f,
+                                   chroma < 1.0f ? "off" : "%.2f x"))
+                config->DlssNrChromaGuard = chroma;
+
+            HelpMarker("The most a pixel's colour may differ from the frame's own, as a ratio. 2.00"
+                       "\nlets it sit twice as far from grey, or half as far, before it is held."
+                       "\n\nEvery other guard here bounds light: the highlight guard caps how much"
+                       "\nbrighter a pixel may get, the edge guard holds the edit back at silhouettes."
+                       "\nNothing bounded how far the COLOUR could travel, and with several passes each"
+                       "\none recolours what the last one recoloured. On skin -- the strongest structure"
+                       "\nthe model applies, on something already reddish -- that walk ends at magenta:"
+                       "\nfaces a few pixels across go pink, worse with every pass, fine once close."
+                       "\n\nIt costs no detail. The result is split into its light and its colour, only"
+                       "\nthe colour is bounded, and the same light is put back -- and every bit of"
+                       "\nstructure the model synthesised is luminance."
+                       "\n\nBelow 1.00 it does not run and the picture is exactly what it was before"
+                       "\nthis existed, which is the default. Start at 2.00 and come down until the"
+                       "\npink goes; if faces flatten, you have come down too far.");
+
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##chroma"))
+                config->DlssNrChromaGuard = 0.0f;
+        }
+
         ImGui::SeparatorText("Model");
 
         ImGui::TextUnformatted("Read when the model is built, so a change rebuilds it after a moment.");
