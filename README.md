@@ -1,6 +1,9 @@
-# OptiScaler DLSS-NR — multi-pass with halo controls (THERMOTRON / Blue Rattler fork)
+# Rattler — multi-pass DLSS Neural Rendering
 
-> A fork of [OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR), which is itself a fork of [OptiScaler](https://github.com/optiscaler/OptiScaler). The upstream project's own README is kept here as [README_OptiScaler.md](README_OptiScaler.md).
+> A fork of [OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR), which is itself a fork of [OptiScaler](https://github.com/optiscaler/OptiScaler). Not affiliated with, or endorsed by, either project or NVIDIA. Upstream's own README is kept here as [README_OptiScaler.md](README_OptiScaler.md).
+
+The name is the only thing here that is a joke: a rattlesnake's rattle is built of stacked
+segments, one added at a time, which is what this does to the model's passes.
 
 It runs NVIDIA's DLSS 5
 Neural Rendering model **more than once per frame** — up to 4 real passes, each on its own model
@@ -179,3 +182,8 @@ skin intact down to a pass at 50% — pass 1 was carrying them the whole time.
 
 Built on Dagherbou's OptiScaler_DLSSNR and the OptiScaler project. Matched-residual resolve from
 hhkbble's PR. Everything else by THERMOTRON.
+
+Licensed GPL-3.0, same as upstream. This is a modified version: the changes are the ones listed
+at the top of this file, and upstream's own README is kept intact as README_OptiScaler.md.
+"Rattler" names this fork only — it is not an OptiScaler release and carries no endorsement from
+the OptiScaler project or from NVIDIA.
