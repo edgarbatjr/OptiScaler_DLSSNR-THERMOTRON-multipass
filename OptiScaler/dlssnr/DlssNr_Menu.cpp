@@ -171,8 +171,49 @@ void RenderMenu(Config* config, float menuResScale)
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("The whole pass: the staging copies and the resolve as well as the"
                                   "\nmodel. Timing only the model would flatter the number."
-                                  "\n\nCompare it against the frame time at the bottom of this window to"
-                                  "\nsee what it is costing you.");
+                                  "\n\nRead it as the GPU time between this pass's own start and end"
+                                  "\nmarkers, which is not the same as the time it ADDS to a frame."
+                                  "\nAnything the GPU waits on between those markers is inside it, so"
+                                  "\nunder heavy load this can read higher than the whole frame time --"
+                                  "\nwhich is impossible as a per-frame cost and is the sign to trust"
+                                  "\nthe frame rate instead. Lightly loaded, the two agree.");
+
+            // The three resolutions, because they decide the cost and they decide the ceiling, and
+            // until now they were only in the log. A game rendering 1920x1080 into a 5760x3240 output
+            // has the model inventing detail across nine times more pixels than were ever drawn: the
+            // most expensive configuration available and the least real, with nothing on screen
+            // saying so.
+            if (!vulkan)
+            {
+                const auto res = DlssNr::CurrentResolutions();
+
+                if (res.valid)
+                {
+                    ImGui::TextDisabled("model %ux%u   frame %ux%u   game drew %ux%u", res.modelWidth,
+                                        res.modelHeight, res.frameWidth, res.frameHeight, res.renderWidth,
+                                        res.renderHeight);
+
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(?)");
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("Model: where the model works. The cost is very nearly its area,"
+                                          "\nso this is the number that decides what the pass costs."
+                                          "\n\nFrame: the picture the model's answer is composed onto."
+                                          "\n\nGame drew: what the game actually rendered before any"
+                                          "\nupscaler. Nothing above this is real -- past it the model is"
+                                          "\nelaborating on its own guesses. And if a downsampler (DSR,"
+                                          "\nDLDSR, output scaling) sits after all this, whatever the model"
+                                          "\nsynthesised above the display's own resolution is averaged"
+                                          "\naway before anyone sees it.");
+
+                    // Worth saying out loud rather than leaving as arithmetic: the model doing many
+                    // times the work the game did is legal, sometimes wanted, and always expensive.
+                    if (res.renderWidth > 0 && res.modelWidth > 2 * res.renderWidth)
+                        ImGui::TextDisabled("   the model works on %.1fx the pixels the game drew",
+                                            (double) res.modelWidth * res.modelHeight /
+                                                ((double) res.renderWidth * res.renderHeight));
+                }
+            }
         }
 
         ImGui::Spacing();

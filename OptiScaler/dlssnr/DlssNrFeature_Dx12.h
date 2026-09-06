@@ -106,6 +106,28 @@ CalibrationReading Calibration();
 // Whether the model is loaded and running, for the overlay.
 bool IsRunning();
 
+// The three resolutions that decide what this pass costs and what it can possibly know, for the menu.
+//
+// They lived only in the log, and that is where a whole afternoon went: a frame rendered at 1920x1080,
+// upscaled to a 5760x3240 output, with the model dutifully synthesising detail across all 18.7 million
+// of those pixels -- nine times more than the game had ever drawn, on a display that shows 4K. Nothing
+// on screen said so. The log knew; the person paying for it did not.
+//
+// Model is where the model works. Frame is the picture it is composed onto. Render is what the game
+// actually drew, before any upscaler touched it -- the ceiling on how much of the result is real.
+struct WorkingResolutions
+{
+    unsigned int modelWidth = 0;
+    unsigned int modelHeight = 0;
+    unsigned int frameWidth = 0;
+    unsigned int frameHeight = 0;
+    unsigned int renderWidth = 0;
+    unsigned int renderHeight = 0;
+    bool valid = false;
+};
+
+WorkingResolutions CurrentResolutions();
+
 // Why it is not, if it is not. Empty while it is running or has not been tried yet.
 const char* FailureReason();
 

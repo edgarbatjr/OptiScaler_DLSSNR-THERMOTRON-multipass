@@ -3521,6 +3521,19 @@ CalibrationReading Calibration()
 
 bool IsRunning() { return g_nr.feature != nullptr && !g_nr.failed; }
 
+WorkingResolutions CurrentResolutions()
+{
+    WorkingResolutions r {};
+    r.modelWidth = g_nr.workWidth;
+    r.modelHeight = g_nr.workHeight;
+    r.frameWidth = g_nr.width;
+    r.frameHeight = g_nr.height;
+    r.renderWidth = g_nr.guideWidth;
+    r.renderHeight = g_nr.guideHeight;
+    r.valid = g_nr.workWidth > 0 && g_nr.width > 0;
+    return r;
+}
+
 const char* FailureReason() { return g_nr.failed ? g_nr.reason : ""; }
 
 // What the game offers by way of exposure, and what has been read from it. For the menu, so a user
