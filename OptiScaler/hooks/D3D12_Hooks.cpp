@@ -2677,7 +2677,8 @@ void D3D12Hooks::RestoreRoot(ID3D12GraphicsCommandList* cmdList)
             }
             else
             {
-                LOG_ERROR("Couldn't restore Compute RootSignature (separate slot), no original SetComputeRootSignature");
+                LOG_ERROR(
+                    "Couldn't restore Compute RootSignature (separate slot), no original SetComputeRootSignature");
             }
         }
     }

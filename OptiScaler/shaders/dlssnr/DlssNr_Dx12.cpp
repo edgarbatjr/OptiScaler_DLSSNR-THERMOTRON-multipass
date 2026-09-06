@@ -765,9 +765,8 @@ void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed)
     for (void*& f : g_nr.passFeature)
         ParkNrFeature(f);
 
-    for (ID3D12Resource** r :
-         { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall, &g_nr.lowFreq, &g_nr.proxyKeep,
-           &g_nr.mixFullA, &g_nr.mixFullB })
+    for (ID3D12Resource** r : { &g_nr.output, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall, &g_nr.lowFreq,
+                                &g_nr.proxyKeep, &g_nr.mixFullA, &g_nr.mixFullB })
         ParkNrResource(*r);
 
     for (unsigned int i = 0; i < kNrMaxPasses; ++i)
@@ -1487,11 +1486,9 @@ DlssNr_Dx12::DlssNr_Dx12(std::string InName, ID3D12Device* InDevice)
 }
 
 bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssNrConstants& InConstants,
-                                  ID3D12Resource* InSource, ID3D12Resource* InModel,
-                                  ID3D12Resource* InOriginal, ID3D12Resource* InMotion,
-                                  ID3D12Resource* InPrevEdit, ID3D12Resource* OutTarget,
-                                  ID3D12Resource* OutKeep, ID3D12Resource* InDepth,
-                                  ID3D12Resource* InLowFreq)
+                               ID3D12Resource* InSource, ID3D12Resource* InModel, ID3D12Resource* InOriginal,
+                               ID3D12Resource* InMotion, ID3D12Resource* InPrevEdit, ID3D12Resource* OutTarget,
+                               ID3D12Resource* OutKeep, ID3D12Resource* InDepth, ID3D12Resource* InLowFreq)
 {
     if (!_init || InCmdList == nullptr || _device == nullptr || InSource == nullptr || OutTarget == nullptr)
         return false;
@@ -1855,8 +1852,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     for (unsigned int i = 1; i < kNrMaxPasses; ++i)
     {
-        if (g_nr.builtPassScale[i] != passScale[i] || g_nr.mixWidth[i] != passW[i] ||
-            g_nr.mixHeight[i] != passH[i])
+        if (g_nr.builtPassScale[i] != passScale[i] || g_nr.mixWidth[i] != passW[i] || g_nr.mixHeight[i] != passH[i])
         {
             // This pass's feature was built for another raster: park it (it rebuilds at the new
             // size next frame, frame-ahead rule as usual) and its small pair with it.
@@ -1866,8 +1862,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             g_nr.builtPassScale[i] = passScale[i];
             g_nr.mixWidth[i] = passW[i];
             g_nr.mixHeight[i] = passH[i];
-            LOG_INFO("DLSS-NR pass {} raster: {}x{} ({}% of the working size {}x{})", i + 1, passW[i],
-                     passH[i], (int) (passScale[i] * 100.0f + 0.5f), workWidth, workHeight);
+            LOG_INFO("DLSS-NR pass {} raster: {}x{} ({}% of the working size {}x{})", i + 1, passW[i], passH[i],
+                     (int) (passScale[i] * 100.0f + 0.5f), workWidth, workHeight);
         }
     }
 
@@ -2409,15 +2405,14 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 if (snip.has_value())
                 {
                     g_nr.passFeature[i] = g_nr.create(
-                        snip->wstring().c_str(), State::Instance().NVNGX_ApplicationDataPath.c_str(),
-                        device, cmdList, g_nr.capabilityParams, passW[i], passH[i],
-                        (int) cfg.DlssNrPreset.value_or_default(), cfg.DlssNrIntensity.value_or_default(),
-                        (int) cfg.DlssNrStyle.value_or_default(),
+                        snip->wstring().c_str(), State::Instance().NVNGX_ApplicationDataPath.c_str(), device, cmdList,
+                        g_nr.capabilityParams, passW[i], passH[i], (int) cfg.DlssNrPreset.value_or_default(),
+                        cfg.DlssNrIntensity.value_or_default(), (int) cfg.DlssNrStyle.value_or_default(),
                         cfg.DlssNrLocalStructure.value_or_default(),
                         // Tone belongs to the frame, not the pass, so a later pass's feature is built
                         // with none of it -- the same rule the evaluate below follows.
-                        0.0f, cfg.DlssNrSkinStructure.value_or_default(),
-                        cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, 1);
+                        0.0f, cfg.DlssNrSkinStructure.value_or_default(), cfg.DlssNrAutoMask.value_or_default() ? 1 : 0,
+                        1);
 
                     g_nr.passFeatureFresh[i] = g_nr.passFeature[i] != nullptr;
                     g_nr.passNeedsReset[i] = g_nr.passFeature[i] != nullptr;
@@ -2461,8 +2456,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 said = true;
                 LOG_WARN("DLSS-NR: extra passes need the model's input and output to match, and here "
                          "they do not ({}x{} fmt {} vs {}x{} fmt {}). Running one.",
-                         (unsigned int) a.Width, a.Height, (int) a.Format, (unsigned int) b.Width,
-                         b.Height, (int) b.Format);
+                         (unsigned int) a.Width, a.Height, (int) a.Format, (unsigned int) b.Width, b.Height,
+                         (int) b.Format);
             }
 
             passes = 1;
@@ -2477,12 +2472,12 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // The chain's current full-size picture. Starts as pass 1's answer (output); every later pass
     // that runs advances it to the other full surface. cur != output at the end means a later pass
     // ran through the chain and cur is the answer the resolve reads.
-    const bool mixedRun = mixed && passes > 1 && g_nr.mixFullA != nullptr && g_nr.mixFullB != nullptr &&
-                          modelInput != nullptr;
+    const bool mixedRun =
+        mixed && passes > 1 && g_nr.mixFullA != nullptr && g_nr.mixFullB != nullptr && modelInput != nullptr;
     ID3D12Resource* cur = g_nr.output;
     ID3D12Resource* spare = g_nr.mixFullA;
-    bool curIsSrv = false;    // cur left as a shader resource (a step began and did not finish)
-    int inSrv = -1;           // which mixIn[i] is left as a shader resource, if any
+    bool curIsSrv = false; // cur left as a shader resource (a step began and did not finish)
+    int inSrv = -1;        // which mixIn[i] is left as a shader resource, if any
 
     const bool lockBetween = !mixedRun && passes > 1 && cfg.DlssNrEdgeGuardMode.value_or_default() >= 4 &&
                              cfg.DlssNrEdgeBetweenPasses.value_or_default() && g_nr.proxyKeep != nullptr &&
@@ -2495,15 +2490,12 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     {
         // proxyKeep lives in UNORDERED_ACCESS between frames (CreateScratch's state, and where the
         // lock below leaves it). modelInput is NON_PIXEL_SHADER_RESOURCE here, the model's contract.
-        Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_COPY_SOURCE);
-        Barrier(cmdList, g_nr.proxyKeep, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                D3D12_RESOURCE_STATE_COPY_DEST);
+        Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        Barrier(cmdList, g_nr.proxyKeep, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
         cmdList->CopyResource(g_nr.proxyKeep, modelInput);
         Barrier(cmdList, g_nr.proxyKeep, D3D12_RESOURCE_STATE_COPY_DEST,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_COPY_SOURCE,
-                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
 
     for (unsigned int pass = 0; pass < passes && result == 1; ++pass)
@@ -2515,8 +2507,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             continue;
 
         const bool chainPass = pass > 0 && mixedRun;
-        const bool smallPass = chainPass && passScale[pass] < 0.999f && g_nr.mixIn[pass] != nullptr &&
-                               g_nr.mixOut[pass] != nullptr;
+        const bool smallPass =
+            chainPass && passScale[pass] < 0.999f && g_nr.mixIn[pass] != nullptr && g_nr.mixOut[pass] != nullptr;
 
         if (chainPass)
         {
@@ -2532,8 +2524,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 down.Mode = DlssNrMode_Downsample;
                 down.Width = passW[pass];
                 down.Height = passH[pass];
-                DispatchPass(cmdList, down, cur, nullptr, nullptr, nullptr, nullptr, g_nr.mixIn[pass],
-                             nullptr);
+                DispatchPass(cmdList, down, cur, nullptr, nullptr, nullptr, nullptr, g_nr.mixIn[pass], nullptr);
                 Barrier(cmdList, g_nr.mixIn[pass], D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 inSrv = (int) pass;
@@ -2554,8 +2545,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             lowParams.Width = g_nr.lowFreqWidth;
             lowParams.Height = g_nr.lowFreqHeight;
             lowParams.Passthrough = isHdrBuffer ? 0u : 1u;
-            DispatchPass(cmdList, lowParams, g_nr.proxyKeep, g_nr.output, nullptr, nullptr, nullptr,
-                         g_nr.lowFreq, nullptr);
+            DispatchPass(cmdList, lowParams, g_nr.proxyKeep, g_nr.output, nullptr, nullptr, nullptr, g_nr.lowFreq,
+                         nullptr);
             Barrier(cmdList, g_nr.lowFreq, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
@@ -2568,8 +2559,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             applyParams.Height = workHeight;
             applyParams.Passthrough = isHdrBuffer ? 0u : 1u;
             applyParams.EdgeGuard = cfg.DlssNrEdgeGuard.value_or_default();
-            DispatchPass(cmdList, applyParams, g_nr.output, nullptr, g_nr.proxyKeep, nullptr, nullptr,
-                         modelInput, nullptr, nullptr, g_nr.lowFreq);
+            DispatchPass(cmdList, applyParams, g_nr.output, nullptr, g_nr.proxyKeep, nullptr, nullptr, modelInput,
+                         nullptr, nullptr, g_nr.lowFreq);
 
             Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -2580,8 +2571,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         }
         else if (pass > 0)
         {
-            Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                    D3D12_RESOURCE_STATE_COPY_SOURCE);
+            Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
             Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                     D3D12_RESOURCE_STATE_COPY_DEST);
 
@@ -2589,8 +2579,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
             Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_COPY_DEST,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-            Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_COPY_SOURCE,
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            Barrier(cmdList, g_nr.output, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
 
         // Reset belongs to the frame, not to the pass. Telling the model to forget its history on
@@ -2632,14 +2621,11 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         const unsigned int evalH = chainPass ? passH[pass] : workHeight;
         const float mvToPass = chainPass && width != 0 ? (float) passW[pass] / (float) width : mvToWork;
 
-        result = g_nr.evaluate(
-            cmdList, passUses, g_nr.capabilityParams, passIn, depthIn, motionIn, passOut,
-            evalW, evalH, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0,
-            passReset, passIntensity,
-            (int) cfg.DlssNrStyle.value_or_default(), passStructure,
-            passTone, passSkin,
-            cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToPass,
-            g_nr.guideMvScaleY * mvToPass);
+        result = g_nr.evaluate(cmdList, passUses, g_nr.capabilityParams, passIn, depthIn, motionIn, passOut, evalW,
+                               evalH, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0, passReset,
+                               passIntensity, (int) cfg.DlssNrStyle.value_or_default(), passStructure, passTone,
+                               passSkin, cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToPass,
+                               g_nr.guideMvScaleY * mvToPass);
 
         if (chainPass && result == 1)
         {
@@ -2655,8 +2641,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 mixParams.Height = workHeight;
                 mixParams.Passthrough = isHdrBuffer ? 0u : 1u;
                 mixParams.EdgeGuard = 1.0f;
-                DispatchPass(cmdList, mixParams, cur, g_nr.mixOut[pass], g_nr.mixIn[pass], nullptr, nullptr,
-                             spare, nullptr);
+                DispatchPass(cmdList, mixParams, cur, g_nr.mixOut[pass], g_nr.mixIn[pass], nullptr, nullptr, spare,
+                             nullptr);
 
                 Barrier(cmdList, g_nr.mixOut[pass], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                         D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -2678,8 +2664,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // A chain step that began and did not finish (the model refused): put what it left as shader
     // resources back to rest, so the failure path and the next frame find them where they expect.
     if (curIsSrv)
-        Barrier(cmdList, cur, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, cur, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     if (inSrv >= 0)
         Barrier(cmdList, g_nr.mixIn[inSrv], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -2880,14 +2865,14 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             lowParams.Height = g_nr.lowFreqHeight;
             lowParams.Passthrough = resolveParams.Passthrough;
 
-            DispatchPass(cmdList, lowParams, resolveProxy, resolveAnswer, nullptr, nullptr, nullptr,
-                         g_nr.lowFreq, nullptr);
+            DispatchPass(cmdList, lowParams, resolveProxy, resolveAnswer, nullptr, nullptr, nullptr, g_nr.lowFreq,
+                         nullptr);
             Barrier(cmdList, g_nr.lowFreq, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         }
 
-        DispatchPass(cmdList, resolveParams, resolveProxy, resolveAnswer, g_nr.hdrCopy, motionIn,
-                            exposureTex, target, nullptr, depthIn, wantLowFreq ? g_nr.lowFreq : nullptr);
+        DispatchPass(cmdList, resolveParams, resolveProxy, resolveAnswer, g_nr.hdrCopy, motionIn, exposureTex, target,
+                     nullptr, depthIn, wantLowFreq ? g_nr.lowFreq : nullptr);
 
         if (wantLowFreq)
             Barrier(cmdList, g_nr.lowFreq, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,

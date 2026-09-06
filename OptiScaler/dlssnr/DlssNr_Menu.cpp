@@ -206,25 +206,25 @@ void RenderMenu(Config* config, float menuResScale)
             ImGui::PopStyleColor(2);
 
             HelpMarker("How many times the model runs over the same frame, each pass handed the"
-                           "\nprevious one's answer."
-                           "\n\nCOST IS LINEAR AND IT IS THE WHOLE COST. The model is about 98% of"
-                           "\nwhat this pass spends -- our own shader work is the other 2% -- so four"
-                           "\npasses is four times the model, not four percent more. There is no"
-                           "\namortisation available: the passes are sequential, because each one"
-                           "\nneeds the last one's output."
-                           "\n\n1 is what the model was trained for, and it is the sweet spot."
-                           "\nAbove it the model is enhancing its own output, outside its"
-                           "\ntraining distribution -- detail compounds, and so does anything"
-                           "\nit got wrong."
-                           "\n\n2 and 3 can look good with fine tuning. 4 is the lab ceiling:"
-                           "\nre-feeding converges -- each pass moves the picture less than the"
-                           "\nlast -- so a fourth pays a whole model run to change little, and"
-                           "\nquality, memory and speed fall off together past it. Try it, look,"
-                           "\nand come back down if it does not earn its cost."
-                           "\n\nThis is a screenshot tool. It is not meant for playing."
-                           "\n\nIf the model is running below frame size, extra passes need its"
-                           "\ninput and output to match; where they do not, this quietly runs"
-                           "\none and says so in the log.");
+                       "\nprevious one's answer."
+                       "\n\nCOST IS LINEAR AND IT IS THE WHOLE COST. The model is about 98% of"
+                       "\nwhat this pass spends -- our own shader work is the other 2% -- so four"
+                       "\npasses is four times the model, not four percent more. There is no"
+                       "\namortisation available: the passes are sequential, because each one"
+                       "\nneeds the last one's output."
+                       "\n\n1 is what the model was trained for, and it is the sweet spot."
+                       "\nAbove it the model is enhancing its own output, outside its"
+                       "\ntraining distribution -- detail compounds, and so does anything"
+                       "\nit got wrong."
+                       "\n\n2 and 3 can look good with fine tuning. 4 is the lab ceiling:"
+                       "\nre-feeding converges -- each pass moves the picture less than the"
+                       "\nlast -- so a fourth pays a whole model run to change little, and"
+                       "\nquality, memory and speed fall off together past it. Try it, look,"
+                       "\nand come back down if it does not earn its cost."
+                       "\n\nThis is a screenshot tool. It is not meant for playing."
+                       "\n\nIf the model is running below frame size, extra passes need its"
+                       "\ninput and output to match; where they do not, this quietly runs"
+                       "\none and says so in the log.");
 
             if (passes > 1)
             {
@@ -247,13 +247,13 @@ void RenderMenu(Config* config, float menuResScale)
                 }
 
                 HelpMarker("Per-pass decay. The later passes run with Intensity and Local structure"
-                               "\nmultiplied by this, the first pass always at full strength."
-                               "\n\nThis is the cheap halo lever. The glow along a silhouette is border"
-                               "\ncontrast the model pulls, and three passes pull it three times. A"
-                               "\nweaker second and third pass pull less of it while the model still"
-                               "\nsees the whole frame, so texture keeps compounding but the glow"
-                               "\ndoes not (as much). 1.00 is the old behaviour. Try 0.7 / 0.5 / 0.35."
-                               "\n\nCosts nothing: it is two numbers handed to the model.");
+                           "\nmultiplied by this, the first pass always at full strength."
+                           "\n\nThis is the cheap halo lever. The glow along a silhouette is border"
+                           "\ncontrast the model pulls, and three passes pull it three times. A"
+                           "\nweaker second and third pass pull less of it while the model still"
+                           "\nsees the whole frame, so texture keeps compounding but the glow"
+                           "\ndoes not (as much). 1.00 is the old behaviour. Try 0.7 / 0.5 / 0.35."
+                           "\n\nCosts nothing: it is two numbers handed to the model.");
 
                 if (ImGui::Button("Reset##passdecay"))
                 {
@@ -272,9 +272,8 @@ void RenderMenu(Config* config, float menuResScale)
 
                 for (int p = 2; p <= passes && p <= 4; ++p)
                 {
-                    int percent = pendingScale[p] >= 0
-                                      ? pendingScale[p]
-                                      : (int) lroundf(scaleOpts[p]->value_or_default() * 100.0f);
+                    int percent = pendingScale[p] >= 0 ? pendingScale[p]
+                                                       : (int) lroundf(scaleOpts[p]->value_or_default() * 100.0f);
 
                     if (ImGui::SliderInt(scaleLabels[p], &percent, 25, 100,
                                          percent >= 100 ? "%d%% (same as pass 1)" : "%d%%"))
@@ -288,15 +287,15 @@ void RenderMenu(Config* config, float menuResScale)
                 }
 
                 HelpMarker("Mixed-resolution passes. Pass 1 always runs at Model resolution; each"
-                               "\nlater pass can run at a fraction of it. The pass is shown the"
-                               "\ncurrent picture shrunk, and what it adds comes back as a residual"
-                               "\nlaid over the full-size picture -- so pass 1's fine texture is"
-                               "\nkept whole while the later passes, which mostly compound the"
-                               "\nsilhouette glow, run smaller, softer and cheaper."
-                               "\n\nGo DOWN the ladder, never up: 100 / 85 / 70 keeps the detail"
-                               "\nand loses the glow; 70 / 85 / 100 throws the detail away first"
-                               "\nand then paints the glow at full size. 100% everywhere is the old"
-                               "\nbehaviour. Works with Model resolution at any value.");
+                           "\nlater pass can run at a fraction of it. The pass is shown the"
+                           "\ncurrent picture shrunk, and what it adds comes back as a residual"
+                           "\nlaid over the full-size picture -- so pass 1's fine texture is"
+                           "\nkept whole while the later passes, which mostly compound the"
+                           "\nsilhouette glow, run smaller, softer and cheaper."
+                           "\n\nGo DOWN the ladder, never up: 100 / 85 / 70 keeps the detail"
+                           "\nand loses the glow; 70 / 85 / 100 throws the detail away first"
+                           "\nand then paints the glow at full size. 100% everywhere is the old"
+                           "\nbehaviour. Works with Model resolution at any value.");
 
                 if (ImGui::Button("Reset##passscale"))
                 {
@@ -470,7 +469,9 @@ void RenderMenu(Config* config, float menuResScale)
                        "\n\nOff is byte-identical to before.");
 
         // The edge guard. D3D12 only: the Vulkan pass has no depth slot and ignores these.
-        static const char* edgeNames[] = { "Off", "Soften (blend to frame)", "No brightening",
+        static const char* edgeNames[] = { "Off",
+                                           "Soften (blend to frame)",
+                                           "No brightening",
                                            "Luma lock (model colour, frame light)",
                                            "Detail only (low-frequency lock)",
                                            "Detail only + no brightening band" };
@@ -481,19 +482,19 @@ void RenderMenu(Config* config, float menuResScale)
             config->DlssNrEdgeGuardMode = (uint32_t) edgeMode;
 
         HelpMarker("The halo: a lit rim the model paints on the background along a subject's"
-                       "\nsilhouette, and every pass paints over the last one's. The game's depth says"
-                       "\nexactly where the silhouettes are, so inside a band next to a depth jump the"
-                       "\nedit is held back."
-                       "\n\nSoften blends the result back toward the frame in the band. No brightening"
-                       "\nlets the edit darken there but never lift a pixel, which is what the halo is."
-                       "\nLuma lock keeps the model's colour and texture but the frame's own light."
-                       "\n\nDetail only is the wide-halo cure: the model may add detail but never change"
-                       "\nthe brightness of a region. Its large-scale brightness change (16x16 blocks,"
-                       "\nblurred) is divided back out everywhere, so a glow that spreads 50 pixels"
-                       "\nacross a wall behind a subject is undone while the texture stays. Strength"
-                       "\nis how much of it is undone. The last mode adds the no-brightening band on"
-                       "\ntop, for whatever survives right at the silhouette."
-                       "\n\nDebug view 'Edge guard band' shows the band. Off is byte-identical.");
+                   "\nsilhouette, and every pass paints over the last one's. The game's depth says"
+                   "\nexactly where the silhouettes are, so inside a band next to a depth jump the"
+                   "\nedit is held back."
+                   "\n\nSoften blends the result back toward the frame in the band. No brightening"
+                   "\nlets the edit darken there but never lift a pixel, which is what the halo is."
+                   "\nLuma lock keeps the model's colour and texture but the frame's own light."
+                   "\n\nDetail only is the wide-halo cure: the model may add detail but never change"
+                   "\nthe brightness of a region. Its large-scale brightness change (16x16 blocks,"
+                   "\nblurred) is divided back out everywhere, so a glow that spreads 50 pixels"
+                   "\nacross a wall behind a subject is undone while the texture stays. Strength"
+                   "\nis how much of it is undone. The last mode adds the no-brightening band on"
+                   "\ntop, for whatever survives right at the silhouette."
+                   "\n\nDebug view 'Edge guard band' shows the band. Off is byte-identical.");
 
         if (edgeMode >= 4)
         {
@@ -502,9 +503,9 @@ void RenderMenu(Config* config, float menuResScale)
                 config->DlssNrEdgeBetweenPasses = between;
 
             HelpMarker("With more than one pass, also match each pass's large-scale luminance back to"
-                           "\nthe first pass's input before the next pass runs. Each pass then paints on"
-                           "\nthe last one's detail but not its glow, so the halo does not grow with the"
-                           "\npass count. Two tiny dispatches per extra pass.");
+                       "\nthe first pass's input before the next pass runs. Each pass then paints on"
+                       "\nthe last one's detail but not its glow, so the halo does not grow with the"
+                       "\npass count. Two tiny dispatches per extra pass.");
         }
 
         if (edgeMode != 0)
@@ -518,17 +519,17 @@ void RenderMenu(Config* config, float menuResScale)
                 config->DlssNrEdgeThreshold = edgeThr;
 
             HelpMarker("How big a depth jump counts as a silhouette, as a fraction of 1/z. 0.10 means"
-                           "\nthe far side is at least 10% further away. Lower catches more edges"
-                           "\n(and eventually ordinary surfaces); higher only the clearest silhouettes.");
+                       "\nthe far side is at least 10% further away. Lower catches more edges"
+                       "\n(and eventually ordinary surfaces); higher only the clearest silhouettes.");
 
             float edgeRadius = config->DlssNrEdgeRadius.value_or_default();
             if (ImGui::SliderFloat("Edge band radius (px)", &edgeRadius, 1.0f, 24.0f, "%.0f"))
                 config->DlssNrEdgeRadius = edgeRadius;
 
             HelpMarker("How far from the silhouette the band reaches, in output pixels. The guard is"
-                           "\nfull on the silhouette and fades to half at the radius, the way the halo"
-                           "\nitself fades. At 4K with three passes the halo runs 8-14 pixels; widen"
-                           "\nthe band if a faint rim survives, narrow it if fine foliage goes soft.");
+                       "\nfull on the silhouette and fades to half at the radius, the way the halo"
+                       "\nitself fades. At 4K with three passes the halo runs 8-14 pixels; widen"
+                       "\nthe band if a faint rim survives, narrow it if fine foliage goes soft.");
 
             ImGui::SameLine();
             if (ImGui::SmallButton("Reset##edge"))

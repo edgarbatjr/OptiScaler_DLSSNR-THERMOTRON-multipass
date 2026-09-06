@@ -1272,7 +1272,8 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "EdgeGuard", GetFloatValue(Instance()->DlssNrEdgeGuard.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeThreshold", GetFloatValue(Instance()->DlssNrEdgeThreshold.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeRadius", GetFloatValue(Instance()->DlssNrEdgeRadius.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "EdgeBetweenPasses", GetBoolValue(Instance()->DlssNrEdgeBetweenPasses.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "EdgeBetweenPasses",
+                 GetBoolValue(Instance()->DlssNrEdgeBetweenPasses.value_for_config()).c_str());
     ini.SetValue("DlssNr", "PassDecay2", GetFloatValue(Instance()->DlssNrPassDecay2.value_for_config()).c_str());
     ini.SetValue("DlssNr", "PassDecay3", GetFloatValue(Instance()->DlssNrPassDecay3.value_for_config()).c_str());
     ini.SetValue("DlssNr", "PassDecay4", GetFloatValue(Instance()->DlssNrPassDecay4.value_for_config()).c_str());
