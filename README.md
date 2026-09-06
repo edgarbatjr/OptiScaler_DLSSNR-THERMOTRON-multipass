@@ -21,6 +21,14 @@ feature — and adds the controls we needed to keep the picture clean when doing
 - **Cost presets** in the menu: Performance / Balanced / Quality / Photo, set from the measurements
   in this README. They touch passes, per-pass resolution and per-pass strength only — style,
   intensity, skin and tone are left exactly as you set them.
+- **Model runs before or after the upscaler** (`Placement`): the model's cost is very nearly the
+  area it works on, and after the upscaler that area is the display resolution with nothing to be
+  done about it. Run it before instead and the area becomes the game's own render resolution.
+  Cheaper, and worse — both measured, both below. A switch, not an upgrade.
+- **Colour guard** (`ChromaGuard`): bounds how far a pixel's colour may travel from the frame's,
+  the way the highlight guard already bounds how much brighter it may get. Nothing bounded colour,
+  and with several passes each recolours what the last one recoloured; on skin that ends at
+  magenta. Costs no detail, because detail is luminance. Off by default.
 - **Edge guard** (`EdgeGuardMode`): depth-aware silhouette band (soften / no brightening / luma
   lock) and the "detail only" modes, which divide the model's large-scale brightness change back
   out so only texture stays. Debug view shows the band.
@@ -120,6 +128,70 @@ game, one GPU, one dark scene, and a proxy for texture rather than for beauty.
 Where the ladder is unambiguously right: when you want *more passes than you can afford at full
 resolution*. That is what Balanced and Quality do.
 
+## Where the model runs, and what it costs
+
+Everything above assumes the model runs after the upscaler, on the finished frame. It does not have
+to. `Model runs` in the *Cost* section moves it to before the upscaler, where it works on what the
+game actually rendered.
+
+Same scene, same settings, one switch:
+
+| | model works on | ms |
+|---|---|---|
+| after the upscaler | 5760x3240 | **39.49** |
+| before the upscaler | 1920x1080 | **14.45** |
+
+Read the setup before you read the ratio: that was DSR 2.25 with DLSS Ultra Performance, so the
+output was **nine times the area of the render**, which is why the gap is that wide. At plain 4K
+with DLSS Quality the same switch is nearer 27.5 against 14.5. The further apart the render and the
+display are, the more running early saves.
+
+**It is not free, and the loss is visible.** Detail synthesised at render resolution is
+render-resolution detail, and the upscaler then enlarges it. Tested in a bright scene, a dark
+scene, and at matched cost: before is faster and looks worse than after. So this is for a card that
+cannot afford the model at display resolution at all. A card that can should stay where it was.
+
+The idea is not ours. It is what the [Neural Upstream](https://github.com/matiasLombo) ReShade
+addon does; what this fork adds is the same choice inside OptiScaler, as a switch, so the two can
+be compared side by side without swapping mods. Direct3D 12 only — the D3D11 and Vulkan bridges
+have no seam before the upscaler and keep running after it.
+
+## Three numbers the menu now shows
+
+Under the ms readout: what the model works on, what the frame is, and what the game actually drew.
+
+```
+model 5760x3240   frame 5760x3240   game drew 1920x1080
+   the model works on 9.0x the pixels the game drew
+```
+
+That line is there because its absence cost us an afternoon. Nothing above "game drew" is real —
+past it the model is elaborating on its own guesses — and if a downsampler (DSR, DLDSR, output
+scaling) sits after all of this, whatever was synthesised above the display's own resolution is
+averaged away before anyone sees it. Both were true at once, and only the log knew.
+
+## Things we got wrong, so you do not have to
+
+**The ms readout is not cost per frame.** It is GPU time between the pass's own start and end
+markers, and anything the GPU waits on in between is inside it. Lightly loaded the two agree, which
+is why the cost model below fits. Under load they diverge: we have seen it report 53 ms inside an
+18 ms frame, which is impossible as a per-frame cost. When that happens, trust the frame rate.
+
+**The cost formula assumes a fixed output.** It was fitted at 4K and it holds there. Move the
+output and it misses — 18%, 38%, 45% over as the output grew, with the model's own size unchanged.
+The area term is real; there is a second term for the frame around it that we have not measured.
+
+**Model resolution below ~80% swims.** Reducing it is the largest saving available, and on a still
+frame you can go to 67% and barely see it. In motion, faces and small objects start to shimmer: the
+game jitters its camera every frame, and a reduced raster lands on a different phase each time.
+79–80% was where it stopped, measured by eye on a 5090 in one game. Test yours.
+
+**A detail metric is not a quality metric.** We measured per-block luminance variation and it told
+us the before-upscaler mode had 22% *more* detail at matched cost. It does not: noise, ringing and
+enlarged synthetic detail all raise that number the same way real texture does. The eye said
+otherwise across many configurations and the eye was right. A reference-based comparison would have
+caught it; ours had no reference.
+
 ## The knobs (menu names → ini keys, `[DlssNr]`)
 
 | Menu | Ini | What it does | Our value |
@@ -132,6 +204,8 @@ resolution*. That is what Balanced and Quality do.
 | Edge guard strength / threshold / radius | `EdgeGuard` / `EdgeThreshold` / `EdgeRadius` | how much / what counts as a silhouette (1/z jump) / band width in px | 1.0 / 0.10 / 10–12 |
 | Lock between passes | `EdgeBetweenPasses` | experimental; costs detail, leave off | false |
 | Reversible proxy | `ReversibleMode` | 3 = hybrid (composed), 4 = hybrid + replace (the model's answer is the picture) | 4 on all three games |
+| Model runs | `Placement` | 0 = after the upscaler (display resolution) · 1 = before it (render resolution) | 0 — 1 is for a card that cannot afford 0 |
+| Colour guard | `ChromaGuard` | how far a pixel's colour may travel from the frame's, as a ratio; below 1.0 it does not run | 1.00 — holds the hue to the game's, which is what stopped the magenta |
 
 Model tuning we ship: Intensity 1.5 (1.4 on REDkit), Local structure 1.1, Local tone 0.8, Skin 1.2
 (0.89 on REDkit), Preset 3, auto skin mask, Detail strength 1.1, Colour 1.0. Style is taste per
@@ -153,8 +227,9 @@ throughput, which is a guess. Please open an issue with your GPU, resolution and
 | RTX 4070 / 3080, 1440p | Performance | ~10 |
 | RTX 3070 / 4060, 1440p | 1 pass, Model resolution 75% | ~7 |
 
-If you cannot afford one pass, nothing here rescues that: pass 1 is the floor and it is upstream's,
-not ours. What this fork gives you is the choice of where to spend once you can afford one.
+If you cannot afford one pass after the upscaler, try `Model runs` = before. That is the one lever
+here that changes the floor rather than dividing what sits above it, and it is the reason the switch
+exists — with the loss in the section above understood and accepted, not discovered later.
 
 ## What this fork is, next to the other multi-pass work
 
@@ -181,7 +256,9 @@ skin intact down to a pass at 50% — pass 1 was carrying them the whole time.
 ## Credits
 
 Built on Dagherbou's OptiScaler_DLSSNR and the OptiScaler project. Matched-residual resolve from
-hhkbble's PR. Everything else by THERMOTRON.
+hhkbble's PR. Running the model before the upscaler is the idea behind matiasLombo's Neural
+Upstream ReShade addon; the implementation here is our own, and the switch exists so the two
+placements can be compared without swapping mods. Everything else by THERMOTRON.
 
 Licensed GPL-3.0, same as upstream. This is a modified version: the changes are the ones listed
 at the top of this file, and upstream's own README is kept intact as README_OptiScaler.md.
