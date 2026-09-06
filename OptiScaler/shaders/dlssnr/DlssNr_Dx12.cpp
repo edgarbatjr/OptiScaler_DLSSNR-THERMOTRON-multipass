@@ -3016,6 +3016,19 @@ static ID3D12Resource* g_beforeOut = nullptr;
 static unsigned int g_beforeW = 0;
 static unsigned int g_beforeH = 0;
 
+// What seeds ours with the game's frame, and why a copy is not enough.
+//
+// Dispatch takes a colour and an output, and reads the frame from the OUTPUT: the encode pass, the
+// meter and the hold-frame copy all read it, because for every release so far the two were the same
+// texture and reading either was reading the frame. Handing it a fresh surface therefore showed the
+// model uninitialised memory -- which it dutifully synthesised detail from, and the frame came back
+// a red smear. The pass was working perfectly on garbage.
+//
+// So ours has to arrive holding the game's frame. CopyResource cannot do it: R11G11B10_FLOAT to
+// R16G16B16A16_FLOAT is a format change, and copies demand identical formats. A 1:1 scaler pass
+// converts as a side effect of sampling and writing, which is exactly the conversion wanted.
+static OS_Dx12* g_beforeSeed = nullptr;
+
 // Ours alternates between being written by this pass and read by the upscaler, so it alternates
 // state. False right after creation, when CreateScratch has already left it in UNORDERED_ACCESS.
 static bool g_beforeOutIsRead = false;
@@ -3026,6 +3039,12 @@ void ReleaseBeforeSurface()
     {
         g_beforeOut->Release();
         g_beforeOut = nullptr;
+    }
+
+    if (g_beforeSeed != nullptr)
+    {
+        delete g_beforeSeed;
+        g_beforeSeed = nullptr;
     }
 
     g_beforeW = 0;
@@ -3271,6 +3290,18 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
                          "format {}, which the model does not take and does not belong to us anyway)",
                          w, h, (int) colourDesc.Format);
         }
+
+        if (g_beforeOut != nullptr && g_beforeSeed == nullptr)
+        {
+            // CatmullRom because it interpolates: at 1:1 every tap lands on a texel centre and the
+            // kernel reproduces the source exactly, so this is a copy that happens to change format
+            // rather than a resample that softens the frame before the model has seen it.
+            g_beforeSeed = new OS_Dx12("DLSS-NR before-upscale seed", device, true, Scaler::CatmullRom);
+
+            if (g_beforeSeed != nullptr)
+                LOG_INFO("DLSS-NR before-upscale seed pass built: 1:1, converts format {} to "
+                         "R16G16B16A16_FLOAT", (int) colourDesc.Format);
+        }
     }
 
     device->Release();
@@ -3299,6 +3330,18 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
         Barrier(cmdList, g_beforeOut, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         g_beforeOutIsRead = false;
+    }
+
+    // Ours arrives holding the game's frame, converted. Without this the pass runs on whatever the
+    // allocator last left in that memory -- which is what the first version of this did.
+    if (g_beforeSeed == nullptr || !g_beforeSeed->Dispatch(cmdList, target, g_beforeOut))
+    {
+        ReportSkipOnce("the game's frame could not be seeded into the before-upscale surface");
+
+        Barrier(cmdList, g_beforeOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        g_beforeOutIsRead = true;
+        return;
     }
 
     g_compose->Dispatch(cmdList, target, depth, motion, g_beforeOut, frame, timingQueue);
