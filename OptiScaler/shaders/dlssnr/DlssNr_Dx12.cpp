@@ -2859,6 +2859,54 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         }
     }
 
+    // The size and scaling family: parameters RenoDX's DLSS 5 add-on writes and this fork never has.
+    // All we have ever sent is DLSSNR.Width and DLSSNR.Height, one size, through the forwarder's
+    // create. The add-on also declares an input size, an output size, a scale and an upscaling flag,
+    // and its binary carries a DLSSNRComputeScalingRatioCallback.
+    //
+    // If those mean what they look like, the model can be handed a small picture and asked for a big
+    // one -- which would retire the shrink -> model -> enlarge -> compose sandwich that makes a
+    // reduced pass soft, and would be the first real answer to "cheaper without losing quality".
+    //
+    // This asks and changes nothing. Both types are read for every name, because which one a
+    // parameter is kept as is part of the question. FAIL_UnsupportedParameter on the whole family
+    // retires the idea for the price of a few log lines, which is the cheapest outcome available.
+    {
+        static unsigned int lastFamilyW = 0;
+        static unsigned int lastFamilyH = 0;
+
+        if (g_nr.capabilityParams != nullptr && g_frames > 240 &&
+            (lastFamilyW != workWidth || lastFamilyH != workHeight))
+        {
+            lastFamilyW = workWidth;
+            lastFamilyH = workHeight;
+
+            LOG_INFO("DLSS-NR sizes: we send {}x{}; the frame is {}x{}; the game drew {}x{}. What the "
+                     "model's block answers:",
+                     workWidth, workHeight, width, height, guideWidth, guideHeight);
+
+            auto ask = [](const char* name)
+            {
+                unsigned int u = 0;
+                const NVSDK_NGX_Result ru = g_nr.capabilityParams->Get(name, &u);
+                float f = 0.0f;
+                const NVSDK_NGX_Result rf = g_nr.capabilityParams->Get(name, &f);
+                LOG_INFO("DLSS-NR size readback {}: uint {} ({}), float {} ({})", name, u,
+                         NgxResultName((unsigned int) ru), f, NgxResultName((unsigned int) rf));
+            };
+
+            ask("DLSSNR.Width");
+            ask("DLSSNR.Height");
+            ask("DLSSNR.InputWidth");
+            ask("DLSSNR.InputHeight");
+            ask("DLSSNR.OutputWidth");
+            ask("DLSSNR.OutputHeight");
+            ask("DLSSNR.Upscaling");
+            ask("DLSSNR.Scale");
+            ask("DLSSNR.ScalingRatio");
+        }
+    }
+
     // A few seconds in, so it lands after the values have been written at least once -- and again
     // every time the tuning changes, which is the part that was missing.
     //
