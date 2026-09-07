@@ -2076,6 +2076,28 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
         ID3D12GraphicsCommandList* const createList = ownList ? own.list : cmdList;
 
+        // The control mask, bound BEFORE the create as well as before the evaluate.
+        //
+        // Handed over only at evaluate it did nothing: painted half zero and half one there was no
+        // seam, and painted entirely zero the model went on working at full strength. Which is what
+        // this tree's own forwarder warns about in the create path -- everything set before the
+        // create takes effect, everything set only at evaluate is ignored, because the model reads
+        // its parameters once when it builds the feature. Colour, depth and motion are read at
+        // evaluate, so a resource seemed safe to bind there; a resource the feature has to make room
+        // for may not be.
+        //
+        // Changing MaskTest does not rebuild the feature, so it is read from the ini at launch.
+        if (cfg.DlssNrMaskTest.value_or_default() > 0 && g_nr.maskTex != nullptr &&
+            g_nr.capabilityParams != nullptr)
+        {
+            g_nr.capabilityParams->Set("DLSSNR.ControlMask", (unsigned long long) g_nr.maskTex);
+            g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectBaseX", (unsigned int) 0);
+            g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectBaseY", (unsigned int) 0);
+            g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectWidth", (unsigned int) workWidth);
+            g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectHeight", (unsigned int) workHeight);
+            LOG_INFO("DLSS-NR MASKTEST: control mask also bound before the feature is created");
+        }
+
         g_nr.feature =
             g_nr.create(snippet->wstring().c_str(), State::Instance().NVNGX_ApplicationDataPath.c_str(),
                         device, createList, g_nr.capabilityParams, workWidth, workHeight,
