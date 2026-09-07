@@ -29,6 +29,14 @@ feature — and adds the controls we needed to keep the picture clean when doing
   the way the highlight guard already bounds how much brighter it may get. Nothing bounded colour,
   and with several passes each recolours what the last one recoloured; on skin that ends at
   magenta. Costs no detail, because detail is luminance. Off by default.
+- **UI correction** (`UiCorrection`): whether the model corrects for a drawn interface. It shipped
+  hardcoded **on** from v0.2.0 to v0.5.0, with no way to turn it off, in a pass that hands the model
+  no UI layer, no alpha and no composited back buffer. Off by default now, and a setting — because
+  tried both ways it made no visible difference, and a belief nobody can test is not worth shipping
+  as a constant.
+- **Jitter** (`Jitter`): the model has `JitterOffsetX/Y` inputs and this fork had never written
+  them, so a temporal model was being shown sub-pixel-offset frames without being told they were
+  offset. Now sent, and a switch. Also no visible difference, which is worth saying plainly.
 - **Edge guard** (`EdgeGuardMode`): depth-aware silhouette band (soften / no brightening / luma
   lock) and the "detail only" modes, which divide the model's large-scale brightness change back
   out so only texture stays. Debug view shows the band.
@@ -192,6 +200,35 @@ enlarged synthetic detail all raise that number the same way real texture does. 
 otherwise across many configurations and the eye was right. A reference-based comparison would have
 caught it; ours had no reference.
 
+- **Reading a ratio is not finding a cause.** Three model parameters came back at exactly 0.6 of
+  what the menu said, which looked like the model clamping its inputs and got written up as such.
+  It was this fork's own per-pass decay, multiplying them ten lines above the call. The model had
+  received exactly what it was sent. Check your own code path before you accuse someone else's.
+- **A blink when you toggle a setting is the setting changing, not the setting working.** Two of the
+  changes in v0.5.1 rebuild the model feature, which costs a visible hitch. That hitch was briefly
+  mistaken for the effect.
+
+## Known issue: `Model runs = before` crashes in RE Engine
+
+Switching **Model runs** to *before the upscaler* crashes Onimusha: Way of the Sword, on the first
+frame the model runs, every time. It works in The Blood of Dawnwalker, Starfield and Mortal Shell II.
+
+We spent an evening on it and **do not know why**. What it is not, each ruled out by measurement:
+
+- not the render subrect, and not a resolution mismatch — every size in the log agrees
+- not toggling the switch at runtime — it crashes just as reliably from a clean start
+- not Streamline — Starfield's upscaler runs behind it too, and survives
+- not ReShade — all four games have it
+- not the multi-pass chain — one pass crashes the same
+- not the colour buffer's arrival state — declaring it changed nothing
+
+The fault lands inside NVIDIA's D3D12 user-mode driver, on the frame the model's feature is created.
+Two things that were wrong in that path *were* fixed in this release and neither was the crash.
+
+**The default is `after`, and nothing here affects anyone who leaves it there.** If your game dies
+when you flip that switch, flip it back and tell us the engine — that list above is only four games
+wide and the pattern in it is what we are missing.
+
 ## The knobs (menu names → ini keys, `[DlssNr]`)
 
 | Menu | Ini | What it does | Our value |
@@ -206,6 +243,8 @@ caught it; ours had no reference.
 | Reversible proxy | `ReversibleMode` | 3 = hybrid (composed), 4 = hybrid + replace (the model's answer is the picture) | 4 on all three games |
 | Model runs | `Placement` | 0 = after the upscaler (display resolution) · 1 = before it (render resolution) | 0 — 1 is for a card that cannot afford 0 |
 | Colour guard | `ChromaGuard` | how far a pixel's colour may travel from the frame's, as a ratio; below 1.0 it does not run | 1.00 — holds the hue to the game's, which is what stopped the magenta |
+| UI correction | `UiCorrection` | whether the model corrects for a drawn interface it is not given | false — on until v0.5.0 and invisible either way |
+| Jitter | `Jitter` | hand the model the game's sub-pixel camera offset | true — confirmed arriving, no visible difference |
 
 Model tuning we ship: Intensity 1.5 (1.4 on REDkit), Local structure 1.1, Local tone 0.8, Skin 1.2
 (0.89 on REDkit), Preset 3, auto skin mask, Detail strength 1.1, Colour 1.0. Style is taste per
@@ -258,7 +297,15 @@ skin intact down to a pass at 50% — pass 1 was carrying them the whole time.
 Built on Dagherbou's OptiScaler_DLSSNR and the OptiScaler project. Matched-residual resolve from
 hhkbble's PR. Running the model before the upscaler is the idea behind matiasLombo's Neural
 Upstream ReShade addon; the implementation here is our own, and the switch exists so the two
-placements can be compared without swapping mods. Everything else by THERMOTRON.
+placements can be compared without swapping mods.
+
+The gamut compression is clshortfuse's, from RenoDX (see `Licenses/RenoDX_ATTRIBUTION.txt`), and
+RenoDX earned a second mention in v0.5.1: comparing this fork's parameter list against its DLSS 5
+add-on's is what found the jitter inputs we had never written and the UI correction we had been
+sending unconditionally into a pass with no interface in it. Neither turned out to change the
+picture, but neither was defensible before and both are settings now.
+
+Everything else by THERMOTRON.
 
 Licensed GPL-3.0, same as upstream. This is a modified version: the changes are the ones listed
 at the top of this file, and upstream's own README is kept intact as README_OptiScaler.md.
