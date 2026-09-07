@@ -155,9 +155,17 @@ with DLSS Quality the same switch is nearer 27.5 against 14.5. The further apart
 display are, the more running early saves.
 
 **It is not free, and the loss is visible.** Detail synthesised at render resolution is
-render-resolution detail, and the upscaler then enlarges it. Tested in a bright scene, a dark
-scene, and at matched cost: before is faster and looks worse than after. So this is for a card that
-cannot afford the model at display resolution at all. A card that can should stay where it was.
+render-resolution detail, and the upscaler then enlarges it.
+
+Tested in a bright scene, a dark scene, at matched cost, and at two setups far apart — DSR 2.25 with
+DLSS Ultra Performance, and plain 4K with DLSS Quality, where the render is nearly the display and
+the theory said the loss should vanish. It did not. Before degrades noticeably in both.
+
+The practical form of that: **before came out worse than every `after` configuration tried, including
+the cheap ones.** So if the model at display resolution costs more than you have, the better move is
+to stay on `after` and spend less there — fewer passes, or a lower Model resolution — rather than to
+move it early. This switch is for a card that cannot afford `after` at all, and for finding out
+whether that is true of yours.
 
 The idea is not ours. It is what the [Neural Upstream](https://github.com/matiasLombo) ReShade
 addon does; what this fork adds is the same choice inside OptiScaler, as a switch, so the two can
