@@ -65,56 +65,24 @@ highlighted; move any slider and the highlight clears.
 
 | Preset | Passes | Resolution | Strength | ms (5090, 4K) |
 |---|---|---|---|---|
-| **Performance** | 2 | 100 / 100 | 1.00 | **~14.0** |
-| **Balanced** | 3 | 100 / 100 / 50 | 1.00 / 0.70 | **~16.5** |
-| **Quality** | 4 | 100 / 100 / 100 / 50 | 1.00 / 0.80 / 0.60 | **~23.4** |
-| **Photo** | 4 | all 100 | 1.00 / 0.85 / 0.70 | **~27.5** |
+| **Performance** | 1 | 100 | 1.00 | **~7.2** |
+| **Balanced** | 2 | 100 / 100 | 1.00 | **~14.0** |
+| **Quality** | 3 | 100 / 100 / 100 | 1.00 | **~20.7** |
+| **Photo** | 4 | all 100 | 1.00 | **~27.5** |
 
-The shape of them follows from the two measurements below: keep resolution full wherever the
-budget allows, and spend what is left on one reduced pass, which is the cheap way to add volume.
-Photo holds the later passes back less than the others — that restraint exists to protect motion,
-and on a still it only costs you shaping.
+Every rung is the same thing N times: N passes, full size, every pass given the same instructions.
+Nothing else differs between them, so the cost of a rung is the cost of a pass — about seven
+milliseconds at 4K on a 5090 — and the menu cannot mislead about it.
 
-Since v0.5.2 the first thing to reach for is not one of these but the section directly below. Two
-passes with every pass given the same parameters, and intensity raised, measured cheaper than the
-three-pass chain it was compared against and carried more grain than it.
+They laddered until v0.5.2: later passes weaker and smaller. That ladder was compensating for later
+passes being told something different from the first, which is the subject of the section after
+next. With that fixed it stopped paying — three identical passes measured **20.69 ms** against the
+old four-pass Quality at **23.17**, and were the ones preferred. Per-pass strength and resolution
+are still there, below the presets, for anyone who wants them.
 
-## The same parameters on every pass
-
-Until v0.5.2 a later pass was not given the same instructions as the first. Local tone was zeroed on
-every pass but the first, `PassDecay` weakened intensity and structure, and each pass ran on a model
-feature of its own with a history of its own. All three were invented here, to keep multi-pass under
-control.
-
-A reader on the Adrenaline forum reported this fork's 2x pass as "much inferior" to
-ReShade + RenoDX's DLSS 5 add-on at the same cost. Set side by side at the same seam, that was right.
-The add-on's own log says what it does differently: four CreateFeature calls against 1337
-EvaluateFeature calls — one feature, one history, every pass — and one options revision shared by all
-of a frame's evaluations, so every pass receives the same numbers.
-
-Given the same treatment, this changes. One scene at midday, five shots inside twenty-nine seconds,
-the camera untouched:
-
-| | passes | intensity | ms |
-|---|---|---|---|
-| the older chain | 3, laddered strength | 1.00 | 20.64 |
-| every pass identical | 2 | 1.00 | 14.94 |
-| every pass identical | 2 | 1.20 | 14.90 |
-| every pass identical | 2 | 1.40 | 13.86 |
-| every pass identical | 2 | **1.50** | **14.89** |
-
-From 1.20 up, the two-pass rows carry more grain in a log wall than the three-pass row, and the
-shimmer that made a third pass unpleasant is absent at all of them.
-
-**Intensity costs nothing and a pass costs about six milliseconds.** Across that whole ladder the
-measurement does not move. Passes were being spent on what a slider gives away.
-
-`SharedHistory` and `ToneEveryPass` are on from v0.5.2, and both are switches, so every earlier
-release's behaviour is one click away in *Cost*. A pass at the working size shares the feature; a
-reduced pass keeps its own, because a feature built for one raster cannot be evaluated at another —
-so the resolution ladder and the preset costs above are unaffected.
-
-One GPU, one scene, one pair of eyes.
+**If a rung costs more than you have, raise Intensity before you add a pass.** Across 1.00 to 1.50
+the measurement does not move, and from 1.20 up it carried more grain than an extra pass did. The
+pass is seven milliseconds; the slider is free.
 
 ## What a pass costs
 
@@ -140,6 +108,11 @@ Three laddered passes cost less than two full ones, and four laddered cost less 
 but read the next section before treating that as a win.
 
 Your absolute numbers will differ. The shape should not: measure your own three points and refit.
+
+A note on that table now that the presets no longer ladder: those rows are still what a laddered
+chain costs, and the formula still predicts them. They are the reason the ladder was built and the
+reason it is no longer the default — cheap on paper, and the thing it bought turned out to be a
+compensation for a bug in how later passes were driven.
 
 ## The model will not scale
 
