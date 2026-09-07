@@ -100,6 +100,34 @@ but read the next section before treating that as a win.
 
 Your absolute numbers will differ. The shape should not: measure your own three points and refit.
 
+## The model will not scale
+
+Cost is area, so the question worth asking is whether the model can be handed a small picture and
+asked for a big one. It cannot.
+
+It carries an input size, an output size, an upscaling flag and a scale, and its binary computes a
+scaling ratio. All of it is inert. Asked at feature creation — the only place the model reads its
+parameters, since everything set at evaluate is ignored — for six ratios in one session:
+
+| model is told its input is | and its output is | create |
+|---|---|---|
+| 3456x1944 | 3840x2160 | succeeded |
+| 2880x1620 | 3840x2160 | succeeded |
+| 1920x1080 | 3840x2160 | succeeded |
+| 1267x712 | 3840x2160 | succeeded |
+| 960x540 | 3840x2160 | succeeded |
+| **5760x3240** | **3840x2160** | **succeeded** |
+
+The last row is an input larger than the output, which no upscaler can honour, and it was accepted
+like the rest in the same 100 ms. Nothing in that family is read. The model works at `DLSSNR.Width`
+by `DLSSNR.Height` and nowhere else, and its own scaling-ratio callback says the same: 1.0000 for
+every quality mode, with UltraPerformance refused.
+
+That settles three things. The reduce, run, enlarge behind `Model resolution` and the per-pass ladder
+is not a shortcut taken here — it is the only way to work below the output size. `Model runs = before`
+loses for the same reason and no parameter fixes it. And the one route left to a cheaper pass is
+fewer passes, which is a question about how much a pass gives back, not about how big it is.
+
 ## What the ladder actually buys
 
 At the **same price** (~14 ms), two full passes against three with a 75 / 50 ladder, same scene,
@@ -215,6 +243,14 @@ caught it; ours had no reference.
 - **A blink when you toggle a setting is the setting changing, not the setting working.** Two of the
   changes in v0.5.1 rebuild the model feature, which costs a visible hitch. That hitch was briefly
   mistaken for the effect.
+
+- **Reading a parameter block says who wrote, not what is supported.** The size family above was
+  first declared missing because `DLSSNR.InputWidth` and the rest read back
+  `FAIL_UnsupportedParameter`. They read back that way because nobody had written them:
+  `DLSSNR.Width` answers only because the forwarder's create writes it, and an unwritten name is
+  indistinguishable from a refused one. Written, they all read back fine — which was then taken for
+  the model using them, and is not that either. A block that keeps a name and a model that reads one
+  are different claims, and only a create can tell them apart.
 
 ## Known issue: `Model runs = before` crashes in RE Engine
 
