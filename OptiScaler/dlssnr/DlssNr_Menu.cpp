@@ -800,9 +800,9 @@ void RenderMenu(Config* config, float menuResScale)
 
         HelpMarker("The model's own strength control, applied inside it. Distinct from detail"
                        "\nstrength above, which scales the result afterwards."
-                       "\n\nWhat it looks like, from the person who runs this daily: the textures read"
-                       "\nas though they were higher resolution. That is the thing to watch when"
-                       "\nmoving it -- surfaces gaining grain and weave, not edges getting harder."
+                       "\n\nRaising it makes surfaces read as though they were higher resolution. That"
+                       "\nis what to watch when moving it: grain and weave appearing in textures,"
+                       "\nrather than edges getting harder."
                        "\n\nThe model's documented range is 0 to 1, and its default is 1. It takes"
                        "\nvalues above that without checking them, and they do work -- 1.4 is visibly"
                        "\nstronger than 1.0, not broken. What 'above 1' means is simply that NVIDIA"
