@@ -2133,59 +2133,67 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         // [DlssNr] ScaleTest is a percentage: 50 asks for an input half the width and height of the
         // output. Off by default, because a create that succeeds proves only that create succeeded.
         {
-            const unsigned int pct = std::clamp(cfg.DlssNrScaleTest.value_or_default(), 0u, 99u);
+            // A sweep, not one value. One create that succeeds proves only that one create
+            // succeeded: NGX takes parameters it does not know without complaining, and the
+            // forwarder writes DLSSNR.Width and Height on the same create, so the model may simply
+            // have built the feature it always builds and ignored the rest.
+            //
+            // What separates "reads them" from "ignores them" is a ratio it should not be able to
+            // honour. If every ratio is accepted, including an input LARGER than the output, then
+            // nothing is being read and the idea is dead with proof. If some are refused, the model
+            // is looking -- and the next question is what an evaluate does, which is not this one.
+            static const unsigned int kRatios[] = { 90, 75, 50, 33, 25, 150 };
             static unsigned int probedAt = 0;
 
-            if (pct >= 25 && g_nr.create != nullptr && g_nr.release != nullptr && probedAt != workWidth)
+            if (cfg.DlssNrScaleTest.value_or_default() > 0 && g_nr.create != nullptr &&
+                g_nr.release != nullptr && probedAt != workWidth)
             {
                 probedAt = workWidth;
 
-                const unsigned int inW = workWidth * pct / 100u;
-                const unsigned int inH = workHeight * pct / 100u;
-
-                g_nr.capabilityParams->Set("DLSSNR.InputWidth", inW);
-                g_nr.capabilityParams->Set("DLSSNR.InputHeight", inH);
-                g_nr.capabilityParams->Set("DLSSNR.OutputWidth", (unsigned int) workWidth);
-                g_nr.capabilityParams->Set("DLSSNR.OutputHeight", (unsigned int) workHeight);
-                g_nr.capabilityParams->Set("DLSSNR.Upscaling", (unsigned int) 1);
-                if (g_nr.probeFloat != nullptr && g_nr.floatSlot >= 0)
-                    g_nr.probeFloat(g_nr.capabilityParams, "DLSSNR.Scale", 100.0f / (float) pct,
-                                    g_nr.floatSlot);
-
-                OwnedCommandList probeList;
-                const bool probeOwn = probeList.Open(device);
-                ID3D12GraphicsCommandList* const pl = probeOwn ? probeList.list : cmdList;
-
-                void* probe = g_nr.create(
-                    snippet->wstring().c_str(), State::Instance().NVNGX_ApplicationDataPath.c_str(),
-                    device, pl, g_nr.capabilityParams, workWidth, workHeight,
-                    (int) cfg.DlssNrPreset.value_or_default(), cfg.DlssNrIntensity.value_or_default(),
-                    (int) cfg.DlssNrStyle.value_or_default(), cfg.DlssNrLocalStructure.value_or_default(),
-                    cfg.DlssNrLocalTone.value_or_default(), cfg.DlssNrSkinStructure.value_or_default(),
-                    cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, 0);
-
-                if (probeOwn)
-                    probeList.Submit();
-
-                const auto createResult =
-                    (unsigned int) (g_nr.lastCreate != nullptr ? *g_nr.lastCreate : 0);
-
-                auto held = [](const char* name)
+                for (const unsigned int pct : kRatios)
                 {
-                    unsigned int v = 0;
-                    g_nr.capabilityParams->Get(name, &v);
-                    return v;
-                };
+                    const unsigned int inW = workWidth * pct / 100u;
+                    const unsigned int inH = workHeight * pct / 100u;
 
-                LOG_INFO("DLSS-NR SCALETEST {}%: asked input {}x{} into output {}x{}; create {} "
-                         "(0x{:X} {}); block now holds in {}x{}, out {}x{}, upscaling {}",
-                         pct, inW, inH, workWidth, workHeight, probe != nullptr ? "SUCCEEDED" : "FAILED",
-                         createResult, NgxResultName(createResult), held("DLSSNR.InputWidth"),
-                         held("DLSSNR.InputHeight"), held("DLSSNR.OutputWidth"),
-                         held("DLSSNR.OutputHeight"), held("DLSSNR.Upscaling"));
+                    g_nr.capabilityParams->Set("DLSSNR.InputWidth", inW);
+                    g_nr.capabilityParams->Set("DLSSNR.InputHeight", inH);
+                    g_nr.capabilityParams->Set("DLSSNR.OutputWidth", (unsigned int) workWidth);
+                    g_nr.capabilityParams->Set("DLSSNR.OutputHeight", (unsigned int) workHeight);
+                    g_nr.capabilityParams->Set("DLSSNR.Upscaling", (unsigned int) 1);
+                    if (g_nr.probeFloat != nullptr && g_nr.floatSlot >= 0)
+                        g_nr.probeFloat(g_nr.capabilityParams, "DLSSNR.Scale", 100.0f / (float) pct,
+                                        g_nr.floatSlot);
 
-                if (probe != nullptr)
-                    g_nr.release(probe);
+                    OwnedCommandList probeList;
+                    const bool probeOwn = probeList.Open(device);
+                    ID3D12GraphicsCommandList* const pl = probeOwn ? probeList.list : cmdList;
+
+                    void* probe = g_nr.create(
+                        snippet->wstring().c_str(),
+                        State::Instance().NVNGX_ApplicationDataPath.c_str(), device, pl,
+                        g_nr.capabilityParams, workWidth, workHeight,
+                        (int) cfg.DlssNrPreset.value_or_default(),
+                        cfg.DlssNrIntensity.value_or_default(),
+                        (int) cfg.DlssNrStyle.value_or_default(),
+                        cfg.DlssNrLocalStructure.value_or_default(),
+                        cfg.DlssNrLocalTone.value_or_default(),
+                        cfg.DlssNrSkinStructure.value_or_default(),
+                        cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, 0);
+
+                    if (probeOwn)
+                        probeList.Submit();
+
+                    const auto createResult =
+                        (unsigned int) (g_nr.lastCreate != nullptr ? *g_nr.lastCreate : 0);
+
+                    LOG_INFO("DLSS-NR SCALETEST {}%: input {}x{} into output {}x{} -- create {} (0x{:X} {})",
+                             pct, inW, inH, workWidth, workHeight,
+                             probe != nullptr ? "SUCCEEDED" : "FAILED", createResult,
+                             NgxResultName(createResult));
+
+                    if (probe != nullptr)
+                        g_nr.release(probe);
+                }
 
                 // The block outlives every feature, so anything left in it is inherited by the next
                 // create. Put the identity back or the real feature is built from this experiment.
@@ -2196,6 +2204,9 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 g_nr.capabilityParams->Set("DLSSNR.Upscaling", (unsigned int) 0);
                 if (g_nr.probeFloat != nullptr && g_nr.floatSlot >= 0)
                     g_nr.probeFloat(g_nr.capabilityParams, "DLSSNR.Scale", 1.0f, g_nr.floatSlot);
+
+                LOG_INFO("DLSS-NR SCALETEST done. Every ratio accepted means the model is not reading "
+                         "these; a refusal means it is.");
             }
         }
 
