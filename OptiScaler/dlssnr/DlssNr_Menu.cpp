@@ -375,6 +375,152 @@ void RenderMenu(Config* config, float menuResScale)
             ImGui::Spacing();
         }
 
+        // The bench. Comparing two pass chains by hand means changing three or four controls in the
+        // right order, twice, without missing one -- and then judging the picture from memory while
+        // the menu is shut. Both halves of that are unreliable, and this session lost an evening to
+        // exactly that: a config was judged against a memory of another config that was never quite
+        // what it was remembered as.
+        //
+        // So the button does the changing, and the ms each one cost is kept next to it. Two clicks
+        // and two numbers instead of a ritual. Like the presets above, a slot touches only the pass
+        // chain -- style, intensity, tone and skin stay where you put them, because a comparison
+        // that also changes taste is not a comparison.
+        {
+            struct NrBenchSlot
+            {
+                const char* name;
+                const char* what;
+                unsigned int passes;
+                bool shared;
+                bool toneEvery;
+                float decay[3];
+            };
+
+            // 1 against 2 is the open question: whether two passes with every pass identical give
+            // back what three passes of the older chain gave. If they do, a whole model run comes
+            // off the bill -- which is the only route to "cheaper" left, now that the model has
+            // said it will not scale.
+            static const NrBenchSlot kBench[] = {
+                { "Teste 1", "2 passes, todos iguais", 2, true, true, { 1.00f, 1.00f, 1.00f } },
+                { "Teste 2", "3 passes, do jeito antigo", 3, false, false, { 1.00f, 0.80f, 0.60f } },
+                { "Teste 3", "3 passes, todos iguais", 3, true, true, { 1.00f, 1.00f, 1.00f } },
+                { "Teste 4", "4 passes, do jeito antigo", 4, false, false, { 1.00f, 0.85f, 0.70f } },
+            };
+
+            static float benchMs[IM_ARRAYSIZE(kBench)] = {};
+            static int benchSettled = 0;
+
+            const auto slotActive = [&](const NrBenchSlot& b)
+            {
+                const auto same = [](float a, float c) { return a > c - 0.005f && a < c + 0.005f; };
+                return (unsigned int) config->DlssNrPasses.value_or_default() == b.passes &&
+                       config->DlssNrSharedHistory.value_or_default() == b.shared &&
+                       config->DlssNrToneEveryPass.value_or_default() == b.toneEvery &&
+                       same(config->DlssNrPassDecay2.value_or_default(), b.decay[0]) &&
+                       same(config->DlssNrPassDecay3.value_or_default(), b.decay[1]) &&
+                       same(config->DlssNrPassDecay4.value_or_default(), b.decay[2]);
+            };
+
+            ImGui::SeparatorText("Bancada de teste");
+
+            int activeSlot = -1;
+            for (int i = 0; i < IM_ARRAYSIZE(kBench); ++i)
+            {
+                if (slotActive(kBench[i]))
+                    activeSlot = i;
+            }
+
+            for (int i = 0; i < IM_ARRAYSIZE(kBench); ++i)
+            {
+                if (i > 0)
+                    ImGui::SameLine();
+
+                const bool active = (i == activeSlot);
+
+                if (active)
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.42f, 0.72f, 1.0f));
+
+                if (ImGui::Button(kBench[i].name))
+                {
+                    config->DlssNrPasses = kBench[i].passes;
+                    config->DlssNrSharedHistory = kBench[i].shared;
+                    config->DlssNrToneEveryPass = kBench[i].toneEvery;
+                    config->DlssNrPassDecay2 = kBench[i].decay[0];
+                    config->DlssNrPassDecay3 = kBench[i].decay[1];
+                    config->DlssNrPassDecay4 = kBench[i].decay[2];
+                    // Full size on every pass, on every slot. A reduced pass is a different question
+                    // and would confound this one.
+                    config->DlssNrPassScale2 = 1.0f;
+                    config->DlssNrPassScale3 = 1.0f;
+                    config->DlssNrPassScale4 = 1.0f;
+                    benchSettled = 0;
+                }
+
+                if (active)
+                    ImGui::PopStyleColor();
+
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", kBench[i].what);
+            }
+
+            // Recorded only once the pass has been running this slot for a while. The frames right
+            // after a switch still carry the last one's cost, and a rebuilt feature makes the first
+            // readings meaningless -- writing those down would put a wrong number beside a button
+            // and make it look measured.
+            if (activeSlot >= 0)
+            {
+                if (benchSettled < 60)
+                {
+                    ++benchSettled;
+                }
+                else
+                {
+                    const auto nowMs = vulkan ? DlssNr::LastGpuTimeVk() : DlssNr::LastGpuTime();
+                    if (nowMs.has_value())
+                        benchMs[activeSlot] = (float) nowMs.value();
+                }
+            }
+
+            ImGui::Spacing();
+
+            for (int i = 0; i < IM_ARRAYSIZE(kBench); ++i)
+            {
+                const bool active = (i == activeSlot);
+                const ImVec4 colour = active ? ImVec4(0.4f, 0.9f, 0.5f, 1.0f) : ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+
+                if (benchMs[i] > 0.0f)
+                    ImGui::TextColored(colour, "%s  -  %s  -  %.2f ms", kBench[i].name, kBench[i].what,
+                                       benchMs[i]);
+                else
+                    ImGui::TextColored(colour, "%s  -  %s  -  (nao medido)", kBench[i].name,
+                                       kBench[i].what);
+            }
+
+            if (activeSlot >= 0 && benchSettled < 60)
+            {
+                ImGui::TextDisabled("medindo...");
+            }
+
+            HelpMarker("Four pass chains, one click each, with what each one cost kept beside it."
+                       "\n\nA slot sets only the chain: how many passes, how hard each pushes, and"
+                       "\nwhether every pass is handed the same parameters and the same history."
+                       "\nStyle, intensity, tone and skin are yours and are not touched."
+                       "\n\nThe ms is recorded a second or so after the switch, from this pass's"
+                       "\nown timer, and only while this menu is open. It is the whole pass, not"
+                       "\njust the model, and it is GPU time between our markers rather than the"
+                       "\ntime added to a frame -- good for comparing two of these against each"
+                       "\nother, which is all it is for."
+                       "\n\nTeste 1 against Teste 2 is the open question: whether two passes with"
+                       "\nevery pass identical give back what three of the older chain gave. If"
+                       "\nthey do, a whole model run comes off the bill."
+                       "\n\nJudge the picture with screenshots, not memory. Switch, wait for the"
+                       "\nrebuild to settle, shoot, switch back, shoot again -- and shoot the"
+                       "\nfirst one twice, so a real difference can be told from a scene that"
+                       "\nmoved.");
+
+            ImGui::Spacing();
+        }
+
         {
             // Coloured by what it costs, because the number alone does not say. The model is 98% of
             // this pass's expense and every run pays it again, so the scale is linear and brutal:
