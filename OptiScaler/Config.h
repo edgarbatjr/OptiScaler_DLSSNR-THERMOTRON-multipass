@@ -331,6 +331,23 @@ class Config
     // passes sits about where 0.8 on one did.
     CustomOptional<bool> DlssNrToneEveryPass { true };
 
+    // Whether the passes that share the history are told the frame moved.
+    //
+    // They are not. Passes two and up are re-evaluations of the same frame: the picture has not moved
+    // between them, so the honest motion is zero. This fork sent the frame's own vectors to every pass,
+    // which asked one shared history to be warped once per pass -- four times, at four passes, for one
+    // frame of real movement. Where the model has signal it corrects itself off the pixels and nothing
+    // shows; in shadow it has almost none and leans on the history, which is why the flicker a tester
+    // reported landed on shadows and nowhere else. Measured from a still 13-second capture: temporal
+    // standard deviation peaked at 52 against a scene mean of 1.4, and every hot block was dark.
+    //
+    // It also explains why turning the shared history off was steady: separate histories are each
+    // warped once per frame, with the right vectors. Sharing is not the fault. Lying about motion is.
+    //
+    // On by default. Only applies to passes that actually share -- a reduced pass keeps its own
+    // history and its own honest vectors.
+    CustomOptional<bool> DlssNrStillMv { true };
+
     // Percentage: 50 asks the model, at feature creation, for an input half the width and height of
     // its output. 0 is off, and off is the default -- the only thing this does is build one throwaway
     // feature, log whether it was accepted, and release it. Nothing reaches the picture.

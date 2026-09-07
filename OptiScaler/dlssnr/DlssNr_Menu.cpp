@@ -620,6 +620,32 @@ void RenderMenu(Config* config, float menuResScale)
                 }
 
                 {
+                    bool stillMv = config->DlssNrStillMv.value_or_default();
+
+                    if (ImGui::Checkbox("Later passes see no motion", &stillMv))
+                        config->DlssNrStillMv = stillMv;
+
+                    HelpMarker("Whether the passes that share the history are told the frame moved."
+                               "\n\nThey are not, and that is the default. Passes two and up"
+                               "\nre-evaluate a picture that has not moved since pass one wrote it,"
+                               "\nso their honest displacement is zero."
+                               "\n\nBefore this switch, every pass got the frame's own vectors. One"
+                               "\nshared history was therefore warped once per pass -- four times,"
+                               "\nat four passes, for one frame of real movement. Where the model"
+                               "\nhas pixels to correct from it hides the error; in shadow it has"
+                               "\nalmost none and leans on the history, which is why the flicker"
+                               "\nreported here landed on shadows and nowhere else."
+                               "\n\nMeasured from a still 13-second capture: temporal standard"
+                               "\ndeviation peaked at 52 against a scene mean of 1.4, and every hot"
+                               "\nblock was dark."
+                               "\n\nIt is also why turning One history off was steady: separate"
+                               "\nhistories are each warped once a frame, with the right vectors."
+                               "\nSharing is not the fault. Lying about motion is."
+                               "\n\nOnly applies to passes that share. A reduced pass keeps its own"
+                               "\nhistory and its own honest vectors.");
+                }
+
+                {
                     bool toneEvery = config->DlssNrToneEveryPass.value_or_default();
 
                     if (ImGui::Checkbox("Tone on every pass", &toneEvery))

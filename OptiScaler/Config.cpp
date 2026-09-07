@@ -369,6 +369,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrJitter.set_from_config(readBool("DlssNr", "Jitter"));
             DlssNrSharedHistory.set_from_config(readBool("DlssNr", "SharedHistory"));
             DlssNrToneEveryPass.set_from_config(readBool("DlssNr", "ToneEveryPass"));
+            DlssNrStillMv.set_from_config(readBool("DlssNr", "StillMv"));
             DlssNrScaleTest.set_from_config(readUInt("DlssNr", "ScaleTest"));
             DlssNrMaskTest.set_from_config(readUInt("DlssNr", "MaskTest"));
             DlssNrReversibleMode.set_from_config(readUInt("DlssNr", "ReversibleMode"));
@@ -1282,6 +1283,7 @@ bool Config::SaveIni()
                  GetBoolValue(Instance()->DlssNrSharedHistory.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ToneEveryPass",
                  GetBoolValue(Instance()->DlssNrToneEveryPass.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "StillMv", GetBoolValue(Instance()->DlssNrStillMv.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ScaleTest",
                  GetIntValue(Instance()->DlssNrScaleTest.value_for_config()).c_str());
     ini.SetValue("DlssNr", "MaskTest",

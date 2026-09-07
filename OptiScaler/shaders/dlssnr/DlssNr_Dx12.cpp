@@ -2960,11 +2960,20 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                             g_nr.floatSlot);
         }
 
+        // Motion belongs to the frame, not to the pass -- and only the first pass of a frame is where
+        // the frame moved. Passes two and up re-evaluate a picture that has not moved since pass one
+        // wrote it, so their honest displacement is zero. Sending the frame's vectors again asked the
+        // one shared history to be warped once per pass, which is what a tester saw as shadow flicker:
+        // where the model has pixels to correct from it hides the error, and in shadow it has none.
+        // A reduced pass keeps its own history, so it keeps its own vectors too.
+        const bool passStill = pass > 0 && passShares && cfg.DlssNrStillMv.value_or_default();
+        const float passMvX = passStill ? 0.0f : g_nr.guideMvScaleX * mvToPass;
+        const float passMvY = passStill ? 0.0f : g_nr.guideMvScaleY * mvToPass;
+
         result = g_nr.evaluate(cmdList, passUses, g_nr.capabilityParams, passIn, depthIn, motionIn, passOut, evalW,
                                evalH, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0, passReset,
                                passIntensity, (int) cfg.DlssNrStyle.value_or_default(), passStructure, passTone,
-                               passSkin, cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, g_nr.guideMvScaleX * mvToPass,
-                               g_nr.guideMvScaleY * mvToPass);
+                               passSkin, cfg.DlssNrAutoMask.value_or_default() ? 1 : 0, passMvX, passMvY);
 
         if (chainPass && result == 1)
         {
