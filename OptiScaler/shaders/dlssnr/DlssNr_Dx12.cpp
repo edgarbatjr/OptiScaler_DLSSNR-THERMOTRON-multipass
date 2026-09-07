@@ -240,6 +240,11 @@ struct NrState
     // between-pass lock can match each pass's answer to the frame the model was first shown.
     ID3D12Resource* proxyKeep = nullptr;
 
+    // The control mask, when we are finding out what the model does with one. Nothing writes it in
+    // normal operation and the parameter is cleared when the test is off, because the model's block
+    // outlives the feature and a stale resource pointer left in it is a pointer to freed memory.
+    ID3D12Resource* maskTex = nullptr;
+
     // Mixed-resolution passes. Pass 1 runs at the working size into `output`. Each later pass i
     // may run at its own fraction of it: it is shown the current full-size picture shrunk
     // (mixIn[i]), answers at that size (mixOut[i]), and what it added -- the difference of the two
@@ -1970,6 +1975,12 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     if (g_nr.proxyKeep == nullptr)
         g_nr.proxyKeep = CreateScratch(device, desc.Format, workWidth, workHeight);
 
+    // R8_UNORM, which is the shape a per-pixel 0..1 mask usually takes. If the model refuses it the
+    // evaluate says so in the log and the next thing to try is a float format; nothing here guesses
+    // twice in silence.
+    if (cfg.DlssNrMaskTest.value_or_default() > 0 && g_nr.maskTex == nullptr)
+        g_nr.maskTex = CreateScratch(device, DXGI_FORMAT_R8_UNORM, workWidth, workHeight);
+
     if (mixed)
     {
         if (g_nr.mixFullA == nullptr)
@@ -2723,6 +2734,55 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // against the alternative in one scene. Off by default; the switch is what makes the test possible.
     const bool sharedHistory = cfg.DlssNrSharedHistory.value_or_default();
 
+    // DLSSNR.ControlMask. The model's own parameter table carries it, with a subrect, right beside
+    // UseAutoMask -- the automatic semantic masking and the engine-level masking NVIDIA describes.
+    // Nothing in this fork has ever written it, and the DLL says nothing about what the values mean.
+    //
+    // So the first one painted is a mask that cannot be misread: zero on the left half of the frame
+    // and one on the right. If the model reads it there is a seam down the middle of the picture,
+    // and the side that changed says which way round the values go. No seam means it is ignored here
+    // and the idea costs one session.
+    //
+    // The parameter is cleared when the test is off. The model's block outlives every feature, so a
+    // resource pointer left in it is a pointer to memory that has been freed.
+    const unsigned int maskTest = cfg.DlssNrMaskTest.value_or_default();
+    const bool maskOn = maskTest > 0 && g_nr.maskTex != nullptr;
+
+    if (maskOn)
+    {
+        DlssNrConstants maskParams {};
+        maskParams.Mode = DlssNrMode_MaskTest;
+        maskParams.Width = workWidth;
+        maskParams.Height = workHeight;
+        maskParams.DebugView = maskTest;
+        DispatchPass(cmdList, maskParams, modelInput, nullptr, nullptr, nullptr, nullptr, g_nr.maskTex,
+                     nullptr);
+
+        Barrier(cmdList, g_nr.maskTex, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        g_nr.capabilityParams->Set("DLSSNR.ControlMask", (unsigned long long) g_nr.maskTex);
+        g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectBaseX", (unsigned int) 0);
+        g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectBaseY", (unsigned int) 0);
+        g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectWidth", (unsigned int) workWidth);
+        g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectHeight", (unsigned int) workHeight);
+
+        static unsigned int maskSaid = 0;
+        if (maskSaid != maskTest)
+        {
+            maskSaid = maskTest;
+            LOG_INFO("DLSS-NR MASKTEST {}: control mask {}x{} R8_UNORM handed to the model ({})",
+                     maskTest, workWidth, workHeight,
+                     maskTest == 1   ? "left half zero, right half one"
+                     : maskTest == 2 ? "all zero"
+                                     : "all one");
+        }
+    }
+    else
+    {
+        g_nr.capabilityParams->Set("DLSSNR.ControlMask", (unsigned long long) 0);
+    }
+
     for (unsigned int pass = 0; pass < passes && result == 1; ++pass)
     {
         // Frame-ahead rule: a pass feature built on this very command list is not evaluated on it.
@@ -2917,6 +2977,10 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             cur = next;
         }
     }
+
+    if (maskOn)
+        Barrier(cmdList, g_nr.maskTex, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     // A chain step that began and did not finish (the model refused): put what it left as shader
     // resources back to rest, so the failure path and the next frame find them where they expect.

@@ -776,6 +776,29 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     }
 #endif
 
+    // Mode 9: paint a control mask, so we can find out what DLSSNR.ControlMask does.
+    //
+    // The model's own parameter table has ControlMask with a subrect, next to UseAutoMask, which is
+    // the pair NVIDIA describes as automatic semantic masking and engine-level masking. Nothing in
+    // this fork has ever written it and nothing in the DLL says what values mean.
+    //
+    // So the first mask is one that cannot be misread: zero on the left half of the frame, one on
+    // the right. If the model reads it there is a seam down the middle of the picture, and which
+    // side is affected says which way round the values go. If there is no seam, it is ignored.
+    //
+    // gDebugView carries which mask to paint: 1 half and half, 2 all zero, 3 all one.
+    if (gMode == 9)
+    {
+        float v = 1.0;
+        if (gDebugView == 1)
+            v = id.x < (gWidth / 2u) ? 0.0 : 1.0;
+        else if (gDebugView == 2)
+            v = 0.0;
+
+        gTarget[id.xy] = float4(v, v, v, v);
+        return;
+    }
+
     if (gMode == 2)
     {
         uint srcW, srcH;

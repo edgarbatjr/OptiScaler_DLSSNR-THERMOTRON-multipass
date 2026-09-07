@@ -370,6 +370,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrSharedHistory.set_from_config(readBool("DlssNr", "SharedHistory"));
             DlssNrToneEveryPass.set_from_config(readBool("DlssNr", "ToneEveryPass"));
             DlssNrScaleTest.set_from_config(readUInt("DlssNr", "ScaleTest"));
+            DlssNrMaskTest.set_from_config(readUInt("DlssNr", "MaskTest"));
             DlssNrReversibleMode.set_from_config(readUInt("DlssNr", "ReversibleMode"));
             DlssNrEdgeGuardMode.set_from_config(readUInt("DlssNr", "EdgeGuardMode"));
             DlssNrEdgeGuard.set_from_config(readFloat("DlssNr", "EdgeGuard"));
@@ -1283,6 +1284,8 @@ bool Config::SaveIni()
                  GetBoolValue(Instance()->DlssNrToneEveryPass.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ScaleTest",
                  GetIntValue(Instance()->DlssNrScaleTest.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "MaskTest",
+                 GetIntValue(Instance()->DlssNrMaskTest.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ReversibleMode", GetIntValue(Instance()->DlssNrReversibleMode.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeGuardMode", GetIntValue(Instance()->DlssNrEdgeGuardMode.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeGuard", GetFloatValue(Instance()->DlssNrEdgeGuard.value_for_config()).c_str());

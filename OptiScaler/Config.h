@@ -339,6 +339,14 @@ class Config
     // could make this pass cheaper without making it softer.
     CustomOptional<uint32_t> DlssNrScaleTest { 0 };
 
+    // Diagnostic: paints a control mask and hands it to the model, to find out what DLSSNR.ControlMask
+    // does. 1 paints zero on the left half of the frame and one on the right, so a model that reads it
+    // leaves a seam down the middle; 2 is all zero, 3 all one. 0 is off, and off clears the parameter.
+    //
+    // The model carries ControlMask beside UseAutoMask -- the automatic masking and the engine-level
+    // masking NVIDIA describes -- and nothing here has ever written it.
+    CustomOptional<uint32_t> DlssNrMaskTest { 0 };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.

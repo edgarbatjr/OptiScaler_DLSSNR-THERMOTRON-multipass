@@ -24,8 +24,12 @@ enum DlssNrMode : uint32_t
     DlssNrMode_LowFreq = 6,      // proxy + answer -> 16x16-block mean luminances (R proxy, G answer)
     DlssNrMode_LowFreqApply = 7, // a pass answer -> the same answer with its low-frequency luminance
                                  // matched to the first pass's input (between passes)
-    DlssNrMode_MixedCompose = 8  // first pass (full) + later passes (small) -> a full-size answer:
+    DlssNrMode_MixedCompose = 8, // first pass (full) + later passes (small) -> a full-size answer:
                                  // pass1 + enlarge(smallOut - smallBase). Mixed-resolution passes.
+
+    // Paints a control mask into the target: 1 half and half, 2 all zero, 3 all one, chosen by
+    // DebugView. For finding out what DLSSNR.ControlMask does, which nothing here has ever written.
+    DlssNrMode_MaskTest = 9
 };
 
 // The meter's grid. 64 x 64 tiles over the whole frame, whatever its size.
