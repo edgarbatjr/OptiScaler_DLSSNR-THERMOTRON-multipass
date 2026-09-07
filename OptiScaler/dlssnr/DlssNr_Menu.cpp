@@ -264,10 +264,19 @@ void RenderMenu(Config* config, float menuResScale)
         // The 0.92 is the part worth knowing: every pass carries that much no matter how small its
         // raster, so a pass has a floor of about 1.1 ms and cannot be made free by shrinking it.
         //
-        // What the ladder actually buys, measured the same way: dropping a later pass's resolution
-        // costs fine texture and buys shaping. Two full passes beat three laddered ones on surface
-        // detail at the same price. So the presets keep resolution full wherever the budget allows
-        // and spend what is left on an extra reduced pass, which is the cheap way to add volume.
+        // Every preset here is now the same thing N times: N passes, full size, same instructions.
+        // The rungs are one model run apart and nothing else differs, so the cost of a rung is the
+        // cost of a pass and the menu cannot mislead about it.
+        //
+        // Until v0.5.2 they laddered instead -- later passes weaker and smaller. That ladder was
+        // compensating for later passes being given different instructions from the first, and with
+        // that fixed it stopped paying: three identical passes were measured cheaper AND preferred
+        // over the four-pass ladder that used to be Quality, 20.69 ms against 23.17. The per-pass
+        // strength and resolution controls are still there, below, for anyone who wants them.
+        //
+        // What to reach for when a rung is too expensive: Intensity. It costs nothing measurable --
+        // across 1.00 to 1.50 the ms did not move -- and from 1.20 up it carried more grain than an
+        // extra pass did. A pass is about seven milliseconds; the slider is free.
         {
             struct NrCostPreset
             {
@@ -280,39 +289,50 @@ void RenderMenu(Config* config, float menuResScale)
 
             static const NrCostPreset kNrCostPresets[] = {
                 { "Performance",
+                  1,
+                  { 1.0f, 1.0f, 1.0f },
+                  { 1.00f, 1.00f, 1.00f },
+                  "One pass. About 7 ms at 4K on a 5090."
+                  "\n\nWhat the model was trained to do, and the only rung where it is not being"
+                  "\nasked to enhance its own output. If you want more from here, raise Intensity"
+                  "\nbefore you add a pass -- the slider is free and the pass is seven"
+                  "\nmilliseconds." },
+                { "Balanced",
                   2,
                   { 1.0f, 1.0f, 1.0f },
                   { 1.00f, 1.00f, 1.00f },
-                  "Two passes, both full size.\n\nThe best detail per millisecond of the four: in"
-                  "\ntesting it kept 86% of the fine surface detail of three full passes for two"
-                  "\nthirds of the cost, and beat a three-pass ladder of the same price on both"
-                  "\ncounts at once." },
-                { "Balanced",
-                  3,
-                  { 1.0f, 0.5f, 1.0f },
-                  { 1.00f, 0.70f, 1.00f },
-                  "Two full passes for the texture, a third at half size for the shaping.\n\nThe"
-                  "\nthird pass is where volume and depth come from, and shaping survives a small"
-                  "\nraster -- which is what makes it cheap." },
+                  "Two passes, both full size, both given the same instructions. About 14 ms."
+                  "\n\nMeasured against the three-pass ladder this preset used to be: cheaper,"
+                  "\nmore grain in a log wall from Intensity 1.20 up, and steadier -- the shimmer"
+                  "\nthat made the third pass unpleasant is not here." },
                 { "Quality",
-                  4,
-                  { 1.0f, 1.0f, 0.5f },
-                  { 1.00f, 0.80f, 0.60f },
-                  "Three full passes, then a fourth at half size.\n\nAll the texture the model has"
-                  "\nto give, plus one more layer of shaping for a little over two milliseconds." },
+                  3,
+                  { 1.0f, 1.0f, 1.0f },
+                  { 1.00f, 1.00f, 1.00f },
+                  "Three passes, all full size, all given the same instructions. About 21 ms."
+                  "\n\nThis replaced a four-pass ladder that cost 23.17 ms. Side by side, three"
+                  "\nidentical passes were preferred over it -- one model run less, and better."
+                  "\nThat is the whole lesson of v0.5.2 in one row." },
                 { "Photo",
                   4,
                   { 1.0f, 1.0f, 1.0f },
-                  { 1.00f, 0.85f, 0.70f },
-                  "Four passes, all full size, and the later ones held back less than the other"
-                  "\npresets hold them.\n\nThat restraint exists to protect motion. On a still it"
-                  "\nonly costs you shaping, so this preset spends it. Not meant for playing." },
+                  { 1.00f, 1.00f, 1.00f },
+                  "Four passes, all full size. About 27 ms."
+                  "\n\nThe fourth pays a whole model run to change little: re-feeding converges,"
+                  "\nso each pass moves the picture less than the last. Try it, look, and come"
+                  "\nback down if it does not earn its cost. Not meant for playing." },
             };
 
             const auto nrPresetActive = [&](const NrCostPreset& p)
             {
                 const auto closeTo = [](float a, float b) { return a > b - 0.005f && a < b + 0.005f; };
                 if ((unsigned int) config->DlssNrPasses.value_or_default() != p.passes)
+                    return false;
+                // A preset now means "the same thing N times", so the two switches that decide
+                // whether the passes are the same thing are part of it. Without this the menu would
+                // highlight Quality while the passes were being given different instructions.
+                if (!config->DlssNrSharedHistory.value_or_default() ||
+                    !config->DlssNrToneEveryPass.value_or_default())
                     return false;
                 return closeTo(config->DlssNrPassScale2.value_or_default(), p.scale[0]) &&
                        closeTo(config->DlssNrPassScale3.value_or_default(), p.scale[1]) &&
@@ -339,6 +359,8 @@ void RenderMenu(Config* config, float menuResScale)
                 if (ImGui::Button(p.name))
                 {
                     config->DlssNrPasses = p.passes;
+                    config->DlssNrSharedHistory = true;
+                    config->DlssNrToneEveryPass = true;
                     config->DlssNrPassScale2 = p.scale[0];
                     config->DlssNrPassScale3 = p.scale[1];
                     config->DlssNrPassScale4 = p.scale[2];
@@ -355,16 +377,22 @@ void RenderMenu(Config* config, float menuResScale)
             }
 
             ImGui::SameLine();
-            HelpMarker("Starting points for the three controls below, and only those three: how"
-                       "\nmany passes, what size each runs at, and how hard each pushes. Your"
-                       "\nstyle, intensity, skin and tone are left exactly as you set them."
-                       "\n\nThe highlighted one is what the sliders currently match; move any of"
-                       "\nthem and no preset is highlighted, which is fine -- they are a place to"
-                       "\nstart, not a place to stay."
-                       "\n\nThe costs behind them were measured, not guessed. On an RTX 5090 at 4K"
-                       "\nthe pass time follows ms = 0.43 + 0.92 x passes + 5.85 x (sum of the"
-                       "\npasses' areas) + 0.18 x (reduced passes), fitted on six configurations."
-                       "\nYour own numbers will differ; the shape of it should not.");
+            HelpMarker("Four rungs, one model run apart, and nothing else different between"
+                       "\nthem: N passes, full size, every pass given the same instructions."
+                       "\nThat is why the cost of a rung is simply the cost of a pass."
+                       "\n\nThey set passes, per-pass resolution and per-pass strength, plus the"
+                       "\ntwo switches that make the passes identical. Your style, intensity,"
+                       "\nskin and tone are left exactly as you set them."
+                       "\n\nUntil v0.5.2 these laddered instead, later passes weaker and smaller."
+                       "\nThe ladder was compensating for later passes being told something"
+                       "\ndifferent from the first, and with that fixed it stopped paying: three"
+                       "\nidentical passes measured 20.69 ms against the old four-pass Quality at"
+                       "\n23.17, and were preferred. Both controls are still below if you want"
+                       "\nthem."
+                       "\n\nIf a rung costs more than you have, raise Intensity instead of adding"
+                       "\na pass. Across 1.00 to 1.50 the measurement did not move, and from 1.20"
+                       "\nup it carried more grain than an extra pass did. A pass is about seven"
+                       "\nmilliseconds; the slider is free.");
 
             if (!anyActive)
             {
