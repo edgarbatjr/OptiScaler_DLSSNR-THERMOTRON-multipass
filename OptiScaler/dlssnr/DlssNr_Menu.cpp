@@ -837,9 +837,12 @@ void RenderMenu(Config* config, float menuResScale)
                        "\ncomposited back buffer -- all three go in as null. RenoDX's add-on, driving"
                        "\nthe same model, turns this on only when its source is the swapchain and off"
                        "\n\"for native DLSS/DLAA and HUD-less sources\", which is what this seam is."
+                       "\n\nTurn it on and the picture flickers; turn it off and it does not. That"
+                       "\nflicker is the one that got called shimmer on faces and soft mask on objects,"
+                       "\nand got worse with every pass added: a correction computed from nothing lands"
+                       "\nsomewhere new every frame."
                        "\n\nIt was on in every release up to v0.5.0, silently, with no way to turn it"
-                       "\noff. It is here so the difference can be seen rather than taken on trust --"
-                       "\nincluding mine. Read when the model is built, so a change rebuilds it.");
+                       "\noff. Read when the model is built, so a change rebuilds it.");
         }
 
         {
