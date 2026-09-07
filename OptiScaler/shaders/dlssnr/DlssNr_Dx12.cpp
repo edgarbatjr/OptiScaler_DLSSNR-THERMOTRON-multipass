@@ -382,6 +382,7 @@ struct NrState
     float builtLocalTone = 0.0f;
     float builtSkinStructure = 0.0f;
     bool builtAutoMask = false;
+    bool builtUiCorrection = false;
     unsigned long long settledAt = 0;
 
     // Once something fails there is no recovering it mid-session, and retrying every frame turns a
@@ -1444,7 +1445,8 @@ bool TuningMatchesFeature(const Config& cfg)
            g_nr.builtLocalStructure == cfg.DlssNrLocalStructure.value_or_default() &&
            g_nr.builtLocalTone == cfg.DlssNrLocalTone.value_or_default() &&
            g_nr.builtSkinStructure == cfg.DlssNrSkinStructure.value_or_default() &&
-           g_nr.builtAutoMask == cfg.DlssNrAutoMask.value_or_default();
+           g_nr.builtAutoMask == cfg.DlssNrAutoMask.value_or_default() &&
+           g_nr.builtUiCorrection == cfg.DlssNrUiCorrection.value_or_default();
 }
 
 void RecordBuiltTuning(const Config& cfg)
@@ -1456,6 +1458,7 @@ void RecordBuiltTuning(const Config& cfg)
     g_nr.builtLocalTone = cfg.DlssNrLocalTone.value_or_default();
     g_nr.builtSkinStructure = cfg.DlssNrSkinStructure.value_or_default();
     g_nr.builtAutoMask = cfg.DlssNrAutoMask.value_or_default();
+    g_nr.builtUiCorrection = cfg.DlssNrUiCorrection.value_or_default();
 }
 
 // Guards the module's state. Every caller is now on the game's render thread, so this is no longer
@@ -2086,7 +2089,10 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                         // SetExtras passes nullptr for the UI layer, its alpha and the back buffer on
                         // every D3D12 path here, so this is not a guess about what the game does --
                         // it is what this code itself provides, which is nothing.
-                        0);
+                        //
+                        // A setting rather than a constant, because it was a constant twice -- on for
+                        // every release, then off -- and neither could be compared against the other.
+                        cfg.DlssNrUiCorrection.value_or_default() ? 1 : 0);
 
         // Submitted and waited on before anything is judged, so that whatever the creation recorded
         // is finished and gone rather than sitting in a list nobody owns.

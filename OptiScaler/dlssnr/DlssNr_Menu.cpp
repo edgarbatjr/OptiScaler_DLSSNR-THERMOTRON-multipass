@@ -825,6 +825,23 @@ void RenderMenu(Config* config, float menuResScale)
         HelpMarker("-1 means follow local structure, and is the model's own default -- it is not a"
                        "\nstrength of zero. 0 and above set skin independently of the rest of the frame.");
 
+        {
+            bool uiCorrection = config->DlssNrUiCorrection.value_or_default();
+
+            if (ImGui::Checkbox("UI correction", &uiCorrection))
+                config->DlssNrUiCorrection = uiCorrection;
+
+            HelpMarker("Whether the model corrects for a drawn interface."
+                       "\n\nOff, and off is almost certainly right here: this pass runs before the game"
+                       "\ndraws its interface, and hands the model no UI layer, no alpha and no"
+                       "\ncomposited back buffer -- all three go in as null. RenoDX's add-on, driving"
+                       "\nthe same model, turns this on only when its source is the swapchain and off"
+                       "\n\"for native DLSS/DLAA and HUD-less sources\", which is what this seam is."
+                       "\n\nIt was on in every release up to v0.5.0, silently, with no way to turn it"
+                       "\noff. It is here so the difference can be seen rather than taken on trust --"
+                       "\nincluding mine. Read when the model is built, so a change rebuilds it.");
+        }
+
         bool autoMask = config->DlssNrAutoMask.value_or_default();
         if (ImGui::Checkbox("Auto skin mask", &autoMask))
             config->DlssNrAutoMask = autoMask;

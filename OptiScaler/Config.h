@@ -270,6 +270,18 @@ class Config
     CustomOptional<float> DlssNrSkinStructure { -1.0f };
     CustomOptional<bool> DlssNrAutoMask { true };
 
+    // Whether the model corrects for a drawn interface.
+    //
+    // Off, because this pass runs at the NGX evaluate -- before the game draws its interface -- and
+    // never hands the model a UI layer, its alpha, or a composited back buffer. All three go in as
+    // null. RenoDX's DLSS 5 add-on, driving the same model, enables this when its source is the
+    // swapchain and disables it "for native DLSS/DLAA and HUD-less sources", which is this.
+    //
+    // It shipped hardcoded on through every release, and was then hardcoded off, which is no better:
+    // a behaviour nobody can compare is a decree. It is a setting now so the difference can be seen
+    // rather than argued about. Read when the model is built, so changing it rebuilds the feature.
+    CustomOptional<bool> DlssNrUiCorrection { false };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.
