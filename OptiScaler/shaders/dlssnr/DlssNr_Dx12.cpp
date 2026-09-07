@@ -3325,6 +3325,48 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
         return;
     }
 
+    // What state the game's colour arrives in, and whether anyone actually knows.
+    //
+    // Both dispatches below read the game's colour as a shader resource, and until now nothing
+    // established what state it was in. After the upscaler the question never arises: colour and
+    // output are the same texture there, and Dispatch transitions it on the way in. Here they are
+    // two different resources, and Dispatch only ever transitions the output -- so the game's
+    // colour was read in whatever state its renderer happened to leave it. That is engine-specific,
+    // it is undefined behaviour when it is wrong, and it is where this crashed: a fault inside the
+    // D3D12 user-mode driver, on the first frame the pass ran, in a game whose colour does not
+    // arrive shader-readable.
+    //
+    // The arrival state comes from the same two places the upscalers in this tree get it, in the
+    // same order (FFXFeature_Dx12.cpp:148): [Hotfix] ColorResourceBarrier when the user set it,
+    // and RENDER_TARGET for Unreal, which is what those upscalers assume.
+    //
+    // When neither says, the pass does not run. That is the whole point of this block: a guessed
+    // StateBefore is not a safer barrier than no barrier, it is the same crash with more steps. The
+    // message names the setting, so the answer is one ini line away rather than a mystery.
+    D3D12_RESOURCE_STATES colourArrival = D3D12_RESOURCE_STATE_COMMON;
+    bool colourStateKnown = false;
+
+    if (Config::Instance()->ColorResourceBarrier.has_value())
+    {
+        colourArrival = (D3D12_RESOURCE_STATES) Config::Instance()->ColorResourceBarrier.value();
+        colourStateKnown = true;
+    }
+    else if (State::Instance().NVNGX_Engine == NVSDK_NGX_ENGINE_TYPE_UNREAL ||
+             State::Instance().gameEngine == GameEngineType::Unreal)
+    {
+        colourArrival = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        colourStateKnown = true;
+    }
+
+    if (!colourStateKnown)
+    {
+        ReportSkipOnce("nothing says what state this game leaves its colour buffer in, and reading it "
+                       "on a guess is what crashes -- set [Hotfix] ColorResourceBarrier for this game "
+                       "(4 = RENDER_TARGET, 64 = PIXEL_SHADER_RESOURCE) to run the model before the "
+                       "upscaler here");
+        return;
+    }
+
     // Back to writable. The upscaler read it as a shader resource last frame.
     if (g_beforeOutIsRead)
     {
@@ -3333,12 +3375,17 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
         g_beforeOutIsRead = false;
     }
 
+    // The game's colour, made readable for the two dispatches, and put back before we return: the
+    // upscaler runs next on this same list and expects to find it exactly as it left it.
+    Barrier(cmdList, target, colourArrival, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
     // Ours arrives holding the game's frame, converted. Without this the pass runs on whatever the
     // allocator last left in that memory -- which is what the first version of this did.
     if (g_beforeSeed == nullptr || !g_beforeSeed->Dispatch(cmdList, target, g_beforeOut))
     {
         ReportSkipOnce("the game's frame could not be seeded into the before-upscale surface");
 
+        Barrier(cmdList, target, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, colourArrival);
         Barrier(cmdList, g_beforeOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         g_beforeOutIsRead = true;
@@ -3346,6 +3393,8 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
     }
 
     g_compose->Dispatch(cmdList, target, depth, motion, g_beforeOut, frame, timingQueue);
+
+    Barrier(cmdList, target, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, colourArrival);
 
     // Readable, and then handed over. The upscaler is about to run on this same list.
     Barrier(cmdList, g_beforeOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
