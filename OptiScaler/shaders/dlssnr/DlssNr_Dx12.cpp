@@ -1930,10 +1930,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     for (unsigned int i = 0; i < kNrMaxPasses; ++i)
     {
         passScale[i] = passScale[i] < 0.25f ? 0.25f : (passScale[i] > 1.0f ? 1.0f : passScale[i]);
-        // One history means one raster. A feature built for the working size cannot be evaluated at a
-        // smaller one, so sharing it forces every pass to full size -- which is also what the add-on
-        // this was measured against does: every evaluation in its log is the full 3840x2160.
-        if (i >= passesWanted || i == 0 || cfg.DlssNrSharedHistory.value_or_default())
+        if (i >= passesWanted || i == 0)
             passScale[i] = 1.0f;
         passW[i] = (unsigned int) (workWidth * passScale[i] + 0.5f);
         passH[i] = (unsigned int) (workHeight * passScale[i] + 0.5f);
@@ -2732,9 +2729,14 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         // The pass is skipped (not run on the shared main feature -- that history clash is what
         // "loses detail on later passes" was) and starts from the next frame.
         //
-        // Shared history has no per-pass feature to wait for, so there is nothing to skip: every pass
-        // runs from the first frame.
-        if (!sharedHistory && pass > 0 && (g_nr.passFeature[pass] == nullptr || g_nr.passFeatureFresh[pass]))
+        // A pass at the working size that shares the history has no per-pass feature to wait for, so
+        // there is nothing to skip and it runs from the first frame. A reduced pass keeps one of its
+        // own and keeps waiting: a feature built for the working size cannot be evaluated smaller,
+        // which is why sharing the history does not have to cost the resolution ladder.
+        const bool passShares = sharedHistory && passScale[pass] >= 0.999f;
+
+        if (!passShares && pass > 0 &&
+            (g_nr.passFeature[pass] == nullptr || g_nr.passFeatureFresh[pass]))
             continue;
 
         const bool chainPass = pass > 0 && mixedRun;
@@ -2827,14 +2829,14 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         // Each pass on its own feature where one exists, so no history is shared. If a later one
         // failed to build, that pass falls back to the first rather than not running -- a repeated
         // pass on a shared history is worse than a separate one, but it is not nothing.
-        void* passUses = (pass > 0 && !sharedHistory) ? g_nr.passFeature[pass] : g_nr.feature;
+        void* passUses = (pass > 0 && !passShares) ? g_nr.passFeature[pass] : g_nr.feature;
         // Reset belongs to the frame. With one shared history there is one thing to reset and pass 0
         // is where it happens; the later passes of the same frame must not throw away what it just
         // established.
-        const int passReset = (pass == 0 || sharedHistory)
+        const int passReset = (pass == 0 || passShares)
                                   ? ((pass == 0 && g_nr.reset) ? 1 : 0)
                                   : (g_nr.passNeedsReset[pass] ? 1 : 0);
-        if (pass > 0 && !sharedHistory)
+        if (pass > 0 && !passShares)
             g_nr.passNeedsReset[pass] = false;
 
         // Per-pass decay. The silhouette glow is border contrast the model pulls, and N passes pull it

@@ -309,25 +309,27 @@ class Config
     // pass.
     //
     // This fork gave each pass its own feature deliberately: a repeated evaluate on a shared history
-    // was blamed for later passes losing detail. Measured against RenoDX's DLSS 5 add-on in The Blood
-    // of Dawnwalker, that add-on does the opposite and looks better doing it -- its log shows four
-    // CreateFeature calls against 1337 EvaluateFeature calls, so its two, three and four passes all
-    // run on one feature with one history.
+    // was blamed for later passes losing detail. Measured against RenoDX's DLSS 5 add-on, which does
+    // the opposite -- four CreateFeature calls against 1337 EvaluateFeature calls in one session --
+    // the split was the thing costing us. On, and on by default since v0.5.2.
     //
-    // Off by default because our own reason for the split was an observation too, and nothing here is
-    // yet proven either way. On, the passes also stop being skipped on the frame a per-pass feature
-    // would have been built, because there is nothing left to build.
-    CustomOptional<bool> DlssNrSharedHistory { false };
+    // A pass that runs at the working size shares the feature. A reduced pass keeps its own, because
+    // a feature built for one raster cannot be evaluated at another, so the resolution ladder still
+    // works and the cost presets still cost what they say.
+    CustomOptional<bool> DlssNrSharedHistory { true };
 
     // Whether Local tone is sent on every pass, or only on the first.
     //
-    // Only on the first, until now: tone is a look, a look is applied once, and passing it every pass
-    // made the second re-grade an already-graded picture -- warmth and contrast stacked with the pass
-    // count while detail did not. RenoDX's add-on sends the same parameters on every pass; its log
-    // shows one options revision shared by all of a frame's evaluations.
+    // Only on the first, until v0.5.2, on the reasoning that tone is a look and a look is applied
+    // once. That reasoning treated a model parameter as a colour filter: zeroed on pass two, the
+    // second pass ran a different model configuration from the one that produced the picture it was
+    // being handed. The add-on above sends the same parameters on every pass -- all of a frame's
+    // evaluations share one options revision in its log -- and that turned out to be the difference
+    // an observer had reported as "much inferior" for the same cost.
     //
-    // Off by default, so the behaviour every release has shipped is what you get until you change it.
-    CustomOptional<bool> DlssNrToneEveryPass { false };
+    // On by default. Watch the dose: tone entering twice at 1.0 read as wax on skin, and 0.5 on two
+    // passes sits about where 0.8 on one did.
+    CustomOptional<bool> DlssNrToneEveryPass { true };
 
     // Percentage: 50 asks the model, at feature creation, for an input half the width and height of
     // its output. 0 is off, and off is the default -- the only thing this does is build one throwaway

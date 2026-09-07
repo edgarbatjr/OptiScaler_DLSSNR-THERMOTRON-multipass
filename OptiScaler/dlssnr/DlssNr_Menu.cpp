@@ -576,22 +576,19 @@ void RenderMenu(Config* config, float menuResScale)
                         config->DlssNrSharedHistory = sharedHistory;
 
                     HelpMarker("Whether every pass runs on ONE model feature, sharing one history."
-                               "\n\nOff, which is what every release has shipped: each pass gets its"
-                               "\nown feature and its own history. That split was deliberate -- a"
+                               "\n\nOn, and on by default since v0.5.2. Every release before it gave"
+                               "\neach pass its own feature and its own history, deliberately: a"
                                "\nrepeated evaluate on a shared history was blamed here for later"
                                "\npasses losing detail."
-                               "\n\nRenoDX\'s DLSS 5 add-on does the opposite, and its own log says so:"
-                               "\nfour CreateFeature calls against 1337 EvaluateFeature calls, with"
-                               "\ntwo, three and four passes a frame. Put next to this fork in one"
-                               "\nscene, at the same seam and the same cost, its picture was the one"
-                               "\npreferred -- finer texture, less halo, better skin, less soft."
-                               "\nOne observer, one scene, one night."
-                               "\n\nOne history means one raster: per-pass resolution is ignored while"
-                               "\nthis is on and every pass runs at the working size. Passes also"
-                               "\nstop being skipped on the frame a per-pass feature would have been"
-                               "\nbuilt, so the count you ask for is the count you get."
-                               "\n\nThe two have never been compared here in one scene. That is what"
-                               "\nthis switch is for.");
+                               "\n\nRenoDX's DLSS 5 add-on does the opposite and its own log says"
+                               "\nso -- four CreateFeature calls against 1337 EvaluateFeature calls,"
+                               "\nwith two, three and four passes a frame. Measured against it at"
+                               "\nthe same seam and the same cost, the split was what was costing"
+                               "\nus."
+                               "\n\nA pass at the working size shares the feature. A reduced pass"
+                               "\nkeeps its own, because a feature built for one raster cannot be"
+                               "\nevaluated at another -- so the resolution ladder still works and"
+                               "\nthe presets still cost what they say.");
                 }
 
                 {
@@ -601,13 +598,16 @@ void RenderMenu(Config* config, float menuResScale)
                         config->DlssNrToneEveryPass = toneEvery;
 
                     HelpMarker("Whether Local tone is sent to every pass, or only to the first."
-                               "\n\nOnly the first, until now, on the reasoning that tone is a look"
-                               "\nand a look is applied once: sent every pass, the second re-grades"
-                               "\nan already-graded picture and the third re-grades that, so warmth"
-                               "\nand contrast stack with the pass count while detail does not."
-                               "\n\nRenoDX\'s add-on sends the same parameters on every pass -- all of"
-                               "\na frame\'s evaluations share one options revision in its log."
-                               "\n\nOff is exactly what every earlier release did.");
+                               "\n\nOn, and on by default since v0.5.2. Before it, only the first,"
+                               "\non the reasoning that tone is a look and a look is applied once."
+                               "\nThat treated a model parameter as a colour filter: zeroed on pass"
+                               "\ntwo, the second pass ran a different model configuration from the"
+                               "\none that produced the picture it was handed."
+                               "\n\nThis is the switch that closed the gap an observer reported as"
+                               "\n\"much inferior at the same cost\" against RenoDX's add-on, which"
+                               "\nsends the same parameters on every pass."
+                               "\n\nWatch the dose. Tone entering twice at 1.0 read as wax on skin;"
+                               "\n0.5 across two passes sits about where 0.8 on one did.");
                 }
 
                 float decay2 = config->DlssNrPassDecay2.value_or_default();
