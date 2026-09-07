@@ -366,6 +366,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrSkinStructure.set_from_config(readFloat("DlssNr", "SkinStructure"));
             DlssNrAutoMask.set_from_config(readBool("DlssNr", "AutoMask"));
             DlssNrUiCorrection.set_from_config(readBool("DlssNr", "UiCorrection"));
+            DlssNrJitter.set_from_config(readBool("DlssNr", "Jitter"));
             DlssNrReversibleMode.set_from_config(readUInt("DlssNr", "ReversibleMode"));
             DlssNrEdgeGuardMode.set_from_config(readUInt("DlssNr", "EdgeGuardMode"));
             DlssNrEdgeGuard.set_from_config(readFloat("DlssNr", "EdgeGuard"));
@@ -1272,6 +1273,7 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "AutoMask", GetBoolValue(Instance()->DlssNrAutoMask.value_for_config()).c_str());
     ini.SetValue("DlssNr", "UiCorrection",
                  GetBoolValue(Instance()->DlssNrUiCorrection.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "Jitter", GetBoolValue(Instance()->DlssNrJitter.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ReversibleMode", GetIntValue(Instance()->DlssNrReversibleMode.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeGuardMode", GetIntValue(Instance()->DlssNrEdgeGuardMode.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeGuard", GetFloatValue(Instance()->DlssNrEdgeGuard.value_for_config()).c_str());

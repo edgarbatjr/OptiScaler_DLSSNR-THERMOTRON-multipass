@@ -842,6 +842,24 @@ void RenderMenu(Config* config, float menuResScale)
                        "\nincluding mine. Read when the model is built, so a change rebuilds it.");
         }
 
+        {
+            bool jitter = config->DlssNrJitter.value_or_default();
+
+            if (ImGui::Checkbox("Send jitter", &jitter))
+                config->DlssNrJitter = jitter;
+
+            HelpMarker("Whether the game's sub-pixel camera offset is passed to the model."
+                       "\n\nThe game moves its projection a fraction of a pixel every frame so the"
+                       "\nupscaler can gather detail across frames. The model has inputs for that"
+                       "\noffset, and this pass never wrote them -- not in any release before this"
+                       "\none. It was found by reading RenoDX's add-on, which drives the same model"
+                       "\nand does send it."
+                       "\n\nNobody has yet seen what it changes, which is why it is a switch: off is"
+                       "\nexactly what every earlier release did, so both can be compared in one"
+                       "\nscene rather than against a memory. Takes effect immediately."
+                       "\n\nThe log says once per session whether this game offers a jitter at all.");
+        }
+
         bool autoMask = config->DlssNrAutoMask.value_or_default();
         if (ImGui::Checkbox("Auto skin mask", &autoMask))
             config->DlssNrAutoMask = autoMask;

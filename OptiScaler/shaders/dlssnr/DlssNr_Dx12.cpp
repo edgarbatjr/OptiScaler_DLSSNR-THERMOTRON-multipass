@@ -2755,8 +2755,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         //
         // Scaled to the raster this pass runs on, for the same reason the motion vectors are: the
         // game's offset is in ITS render pixels, and a reduced pass works in smaller ones.
-        if (frame.JitterValid && g_nr.probeFloat != nullptr && g_nr.floatSlot >= 0 &&
-            g_nr.capabilityParams != nullptr)
+        if (frame.JitterValid && cfg.DlssNrJitter.value_or_default() && g_nr.probeFloat != nullptr &&
+            g_nr.floatSlot >= 0 && g_nr.capabilityParams != nullptr)
         {
             g_nr.probeFloat(g_nr.capabilityParams, "DLSSNR.JitterOffsetX", frame.JitterX * mvToPass,
                             g_nr.floatSlot);

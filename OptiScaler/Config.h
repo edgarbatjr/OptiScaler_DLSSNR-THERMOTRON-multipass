@@ -282,6 +282,19 @@ class Config
     // rather than argued about. Read when the model is built, so changing it rebuilds the feature.
     CustomOptional<bool> DlssNrUiCorrection { false };
 
+    // Whether the game's sub-pixel camera offset is passed to the model.
+    //
+    // On, because the model has inputs for it and this pass had never written them: DLSSNR.Jitter-
+    // OffsetX and Y, found by comparing our parameter block against RenoDX's DLSS 5 add-on. The game
+    // moves its projection a fraction of a pixel every frame so the upscaler can accumulate across
+    // frames, and a temporal model shown those frames without being told they are offset is
+    // reconciling a scene that appears to shake for no reason it can see.
+    //
+    // A setting because nobody has yet seen what it does. Turning it off restores exactly the
+    // behaviour of every release up to v0.5.0, so the two can be compared in one scene in one
+    // session, rather than against a memory of how last week looked.
+    CustomOptional<bool> DlssNrJitter { true };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.
