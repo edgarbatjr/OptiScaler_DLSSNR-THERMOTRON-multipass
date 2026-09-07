@@ -1107,6 +1107,86 @@ float ResolveWhitePoint(const Config& cfg, bool isHdrBuffer)
     return slider;
 }
 
+// A command list of our own, for work that must not land on the game's.
+//
+// Creating the model's feature records commands, and where those commands land turns out to matter.
+// The creation goes onto whatever list is handed in. After the upscaler that is the tail of the
+// game's list: the upscaler has already run and the game rebinds everything before its next draw, so
+// the recording sits harmlessly at the end. Before the upscaler it is the middle -- the game's own
+// DLSS evaluate runs next, on that same list, over the top of it.
+//
+// In Onimusha that faults inside the D3D12 user-mode driver on exactly the frame the feature is
+// created, every time, and never on any other frame. A list that was fine to record and not fine to
+// submit. The comment above the creation already said "every crash died on a creation frame"; the
+// mitigation there deferred our evaluate and left the creation itself on the game's list.
+//
+// So: recorded, submitted and waited on separately, with nothing of it reaching the game.
+struct OwnedCommandList
+{
+    ID3D12CommandQueue* queue = nullptr;
+    ID3D12CommandAllocator* allocator = nullptr;
+    ID3D12GraphicsCommandList* list = nullptr;
+    ID3D12Fence* fence = nullptr;
+    HANDLE done = nullptr;
+
+    bool Open(ID3D12Device* device)
+    {
+        if (device == nullptr)
+            return false;
+
+        D3D12_COMMAND_QUEUE_DESC qd {};
+        qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+
+        if (FAILED(device->CreateCommandQueue(&qd, IID_PPV_ARGS(&queue))) ||
+            FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator))) ||
+            FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr,
+                                             IID_PPV_ARGS(&list))) ||
+            FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
+            return false;
+
+        done = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        return done != nullptr;
+    }
+
+    // Closes, submits, and blocks until the GPU is finished. Once, on a creation frame, so the stall
+    // costs one frame of a session and buys the guarantee that nothing of this is still in flight.
+    bool Submit()
+    {
+        if (list == nullptr || queue == nullptr || fence == nullptr || FAILED(list->Close()))
+            return false;
+
+        ID3D12CommandList* lists[] = { list };
+        queue->ExecuteCommandLists(1, lists);
+
+        if (FAILED(queue->Signal(fence, 1)))
+            return false;
+
+        if (fence->GetCompletedValue() < 1)
+        {
+            if (FAILED(fence->SetEventOnCompletion(1, done)))
+                return false;
+
+            WaitForSingleObject(done, 10000);
+        }
+
+        return true;
+    }
+
+    ~OwnedCommandList()
+    {
+        if (done != nullptr)
+            CloseHandle(done);
+        if (fence != nullptr)
+            fence->Release();
+        if (list != nullptr)
+            list->Release();
+        if (allocator != nullptr)
+            allocator->Release();
+        if (queue != nullptr)
+            queue->Release();
+    }
+};
+
 ID3D12Resource* CreateScratch(ID3D12Device* device, DXGI_FORMAT format, unsigned int width,
                               unsigned int height)
 {
@@ -1961,9 +2041,25 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         }
 
         SetExtras(cfg, nullptr, nullptr, 0, 0, 0, 0);
+
+        // Before the upscaler, the creation goes on a list of our own. See OwnedCommandList. The
+        // after path is untouched and keeps using the game's list, exactly as it has all along --
+        // it is the path every release so far shipped on, and nothing here is worth risking it for.
+        //
+        // If the scratch objects cannot be made we fall back to the game's list, which is today's
+        // behaviour: a failure here is no worse than not having tried.
+        OwnedCommandList own;
+        const bool ownList = DlssNr::RunsBeforeUpscale() && own.Open(device);
+
+        if (DlssNr::RunsBeforeUpscale() && !ownList)
+            LOG_WARN("DLSS-NR: could not make a command list of our own for the model's creation, so "
+                     "it goes on the game's -- this is the path that faults in RE Engine");
+
+        ID3D12GraphicsCommandList* const createList = ownList ? own.list : cmdList;
+
         g_nr.feature =
             g_nr.create(snippet->wstring().c_str(), State::Instance().NVNGX_ApplicationDataPath.c_str(),
-                        device, cmdList, g_nr.capabilityParams, workWidth, workHeight,
+                        device, createList, g_nr.capabilityParams, workWidth, workHeight,
                         (int) cfg.DlssNrPreset.value_or_default(),
                         cfg.DlssNrIntensity.value_or_default(), (int) cfg.DlssNrStyle.value_or_default(),
                         cfg.DlssNrLocalStructure.value_or_default(), cfg.DlssNrLocalTone.value_or_default(),
@@ -1972,6 +2068,11 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                         // UI correction at the model's own default: with no UI layer fed to it there
                         // is nothing for it to correct.
                         1);
+
+        // Submitted and waited on before anything is judged, so that whatever the creation recorded
+        // is finished and gone rather than sitting in a list nobody owns.
+        if (ownList && !own.Submit())
+            LOG_WARN("DLSS-NR: the model's creation could not be submitted on our own command list");
 
         if (g_nr.feature == nullptr)
         {
