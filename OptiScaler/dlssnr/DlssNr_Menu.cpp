@@ -799,11 +799,24 @@ void RenderMenu(Config* config, float menuResScale)
         DeferredSlider("Intensity", &config->DlssNrIntensity, 0.0f, 2.0f, 1.0f);
 
         HelpMarker("The model's own strength control, applied inside it. Distinct from detail"
-                       "\nstrength above, which scales the result afterwards.");
+                       "\nstrength above, which scales the result afterwards."
+                       "\n\nThe model's range is 0 to 1, and its default is 1. Above 1 is off the end"
+                       "\nof what it was built for: it takes the number without checking it, so what"
+                       "\nhappens up there is undefined rather than 'more'. This slider went to 2 with"
+                       "\nnothing saying that, which is how 1.4 came to look like a normal setting."
+                       "\n\nAnd the model does not necessarily keep what it is given: written 1.4, the"
+                       "\nparameter block afterwards held 0.84. The log reports what it kept every time"
+                       "\nthis moves -- search it for 'readback'.");
 
         DeferredSlider("Local structure", &config->DlssNrLocalStructure, 0.0f, 2.0f, 1.0f);
 
+        HelpMarker("Same range as Intensity: 0 to 1, default 1. Above 1 is undefined rather than"
+                       "\nstronger.");
+
         DeferredSlider("Local tone", &config->DlssNrLocalTone, 0.0f, 2.0f, 1.0f);
+
+        HelpMarker("Same range as Intensity: 0 to 1, default 1. Above 1 is undefined rather than"
+                       "\nstronger.");
 
 
         DeferredSlider("Skin structure", &config->DlssNrSkinStructure, -1.0f, 2.0f, -1.0f);

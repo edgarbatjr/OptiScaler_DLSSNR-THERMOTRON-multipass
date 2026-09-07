@@ -179,6 +179,10 @@ struct NrState
     PFN_NrProbeFloat probeFloat = nullptr;
     bool floatSlotKnown = false;
 
+    // Which vtable slot the float setter turned out to be, kept so parameters the positional exports
+    // never had -- the jitter offsets -- can be written through the same route.
+    int floatSlot = -1;
+
     // The scaling-ratio probe, resolved alongside the other forwarder entry points.
     int (*queryRatio)(const wchar_t*, void*, unsigned int, float*) = nullptr;
     const int* lastRatioStage = nullptr;
@@ -668,6 +672,7 @@ void DiscoverFloatSlot(NVSDK_NGX_Parameter* params)
         if (params->Get(kProbeKey, &readBack) == NVSDK_NGX_Result_Success && readBack == expected)
         {
             g_nr.setFloatSlot(slot);
+            g_nr.floatSlot = slot;
             LOG_INFO("DLSS-NR float parameters go through vtable slot {}", slot);
             return;
         }
@@ -2065,9 +2070,23 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                         cfg.DlssNrLocalStructure.value_or_default(), cfg.DlssNrLocalTone.value_or_default(),
                         cfg.DlssNrSkinStructure.value_or_default(),
                         cfg.DlssNrAutoMask.value_or_default() ? 1 : 0,
-                        // UI correction at the model's own default: with no UI layer fed to it there
-                        // is nothing for it to correct.
-                        1);
+                        // UI correction OFF, because this pass never hands the model a UI layer.
+                        //
+                        // This used to pass 1, with a comment calling it "the model's own default:
+                        // with no UI layer fed to it there is nothing for it to correct". The second
+                        // half was right and the conclusion was backwards -- with nothing to correct,
+                        // the correction is not harmless, it is a correction applied to a picture
+                        // that was never composited.
+                        //
+                        // RenoDX's add-on, which drives the same model, says so in its own interface:
+                        // it enables UI correction when the source is the swapchain, and disables it
+                        // "for native DLSS/DLAA and HUD-less sources". This seam is the NGX evaluate,
+                        // before the interface is drawn. HUD-less is exactly what it is.
+                        //
+                        // SetExtras passes nullptr for the UI layer, its alpha and the back buffer on
+                        // every D3D12 path here, so this is not a guess about what the game does --
+                        // it is what this code itself provides, which is nothing.
+                        0);
 
         // Submitted and waited on before anything is judged, so that whatever the creation recorded
         // is finished and gone rather than sitting in a list nobody owns.
@@ -2722,6 +2741,23 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         const unsigned int evalH = chainPass ? passH[pass] : workHeight;
         const float mvToPass = chainPass && width != 0 ? (float) passW[pass] / (float) width : mvToWork;
 
+        // The jitter, written straight into the block the model reads. There is no positional
+        // argument for it -- the exports predate knowing the model wanted it -- so it goes through
+        // the same by-name float setter the slot discovery already uses. That keeps every forwarder
+        // ever shipped working: an old one simply has no probeFloat and the jitter is not sent,
+        // which is exactly today's behaviour rather than a crash.
+        //
+        // Scaled to the raster this pass runs on, for the same reason the motion vectors are: the
+        // game's offset is in ITS render pixels, and a reduced pass works in smaller ones.
+        if (frame.JitterValid && g_nr.probeFloat != nullptr && g_nr.floatSlot >= 0 &&
+            g_nr.capabilityParams != nullptr)
+        {
+            g_nr.probeFloat(g_nr.capabilityParams, "DLSSNR.JitterOffsetX", frame.JitterX * mvToPass,
+                            g_nr.floatSlot);
+            g_nr.probeFloat(g_nr.capabilityParams, "DLSSNR.JitterOffsetY", frame.JitterY * mvToPass,
+                            g_nr.floatSlot);
+        }
+
         result = g_nr.evaluate(cmdList, passUses, g_nr.capabilityParams, passIn, depthIn, motionIn, passOut, evalW,
                                evalH, guideWidth, guideHeight, g_nr.guideDepthInverted ? 1 : 0, passReset,
                                passIntensity, (int) cfg.DlssNrStyle.value_or_default(), passStructure, passTone,
@@ -3252,6 +3288,35 @@ static void EvaluateAtPlacement(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Pa
     params->Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &createFlags);
 
     DlssNrFrameInfo frame {};
+
+    // The jitter the game already told the upscaler about, read the same way every upscaler in this
+    // tree reads it (IFeature.cpp:241). Both or neither: half a jitter is not a jitter.
+    {
+        float jx = 0.0f;
+        float jy = 0.0f;
+
+        if (params->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &jx) == NVSDK_NGX_Result_Success &&
+            params->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &jy) == NVSDK_NGX_Result_Success)
+        {
+            frame.JitterX = jx;
+            frame.JitterY = jy;
+            frame.JitterValid = true;
+        }
+
+        // Once, so the log says whether this game offers it at all -- and with a value, because a
+        // pair of zeroes every frame would mean the parameter exists and is not being used.
+        static bool jitterReported = false;
+
+        if (!jitterReported)
+        {
+            jitterReported = true;
+
+            if (frame.JitterValid)
+                LOG_INFO("DLSS-NR jitter from the game: {:.4f}, {:.4f} -- passed to the model", jx, jy);
+            else
+                LOG_INFO("DLSS-NR jitter: this game does not set it, so none is sent");
+        }
+    }
     frame.DepthInverted = (createFlags & NVSDK_NGX_DLSS_Feature_Flags_DepthInverted) != 0;
     frame.ColourIsLinearHdr = (createFlags & NVSDK_NGX_DLSS_Feature_Flags_IsHDR) != 0;
 

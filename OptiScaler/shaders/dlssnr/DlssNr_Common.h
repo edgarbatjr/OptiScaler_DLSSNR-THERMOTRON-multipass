@@ -70,6 +70,22 @@ struct DlssNrFrameInfo
     // Throw away the model's history. Set it on a cut, a teleport, or the first frame of a feature.
     bool Reset = false;
 
+    // Where the game moved its projection this frame, in render pixels, as it told the upscaler.
+    //
+    // The model has inputs for this -- DLSSNR.JitterOffsetX and Y -- and this pass had never written
+    // them. Every frame the game offsets its camera by a fraction of a pixel so the upscaler can
+    // accumulate detail across frames; a temporal model shown those frames without being told they
+    // are offset is reconciling a scene that appears to shake for no reason it can see.
+    //
+    // Found by comparing, parameter by parameter, against RenoDX's DLSS 5 add-on, which drives the
+    // same model and does write them.
+    //
+    // Valid says whether the game supplied them at all. A game that never sets the parameter is not
+    // asking for a jitter of zero, and writing one would be inventing a fact.
+    float JitterX = 0.0f;
+    float JitterY = 0.0f;
+    bool JitterValid = false;
+
     // Whether the colour buffer holds linear, open-ended light or a frame that has already been
     // through a tonemapper. Getting this wrong encodes an encoded frame a second time, which looks
     // washed out and banded.
