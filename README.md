@@ -9,8 +9,15 @@ It runs NVIDIA's DLSS 5
 Neural Rendering model **more than once per frame** — up to 4 real passes, each on its own model
 feature — and adds the controls we needed to keep the picture clean when doing so:
 
-- **Passes 1–4.** Each pass is a separate NGX feature fed the previous pass's answer (no shared
-  history, so no smear), built one frame ahead so a pass-count change never stalls the frame.
+- **Passes 1–4.** The passes run on **one** model feature, sharing one history, and each is fed the
+  previous pass's answer. Every release up to v0.5.1 gave each pass its own feature deliberately;
+  that was the thing costing us, and the measurement is below. Features are built one frame ahead so
+  a pass-count change never stalls the frame. A pass at a *reduced* resolution keeps its own feature,
+  because a feature built for one raster cannot be evaluated at another.
+- **Same instructions on every pass** (`SharedHistory`, `ToneEveryPass`, `StillMv`): one history,
+  tone sent to every pass rather than only the first, and — the one thing the passes must *not*
+  share — the frame's motion. Passes two and up re-evaluate a picture that has not moved since pass
+  one wrote it, so their honest displacement is zero. All three on by default from v0.5.2.
 - **Per-pass strength** (`PassDecay2/3/4`): the later passes run with Intensity and Local structure
   scaled down. The silhouette glow ("halo") is border contrast the model pulls, and N passes pull it
   N times; weaker later passes pull less of it while the model still sees the whole frame.
@@ -34,9 +41,9 @@ feature — and adds the controls we needed to keep the picture clean when doing
   no UI layer, no alpha and no composited back buffer. Off by default now, and a setting — because
   tried both ways it made no visible difference, and a belief nobody can test is not worth shipping
   as a constant.
-- **Jitter** (`Jitter`): the model has `JitterOffsetX/Y` inputs and this fork had never written
-  them, so a temporal model was being shown sub-pixel-offset frames without being told they were
-  offset. Now sent, and a switch. Also no visible difference, which is worth saying plainly.
+- **Jitter** (`Jitter`): sends `DLSSNR.JitterOffsetX/Y`. **This model build has no such parameter**
+  — see below — so the switch does nothing here. It shipped in v0.5.1 described as a fix; it was not
+  one, and the correction is kept rather than the claim.
 - **Edge guard** (`EdgeGuardMode`): depth-aware silhouette band (soften / no brightening / luma
   lock) and the "detail only" modes, which divide the model's large-scale brightness change back
   out so only texture stays. Debug view shows the band.
@@ -141,6 +148,135 @@ That settles three things. The reduce, run, enlarge behind `Model resolution` an
 is not a shortcut taken here — it is the only way to work below the output size. `Model runs = before`
 loses for the same reason and no parameter fixes it. And the one route left to a cheaper pass is
 fewer passes, which is a question about how much a pass gives back, not about how big it is.
+
+## What the model does not have
+
+Cost is area and the model will not scale, so the next question is whether anything *else* on its
+interface can be reached for. We pulled every `DLSSNR.*` name out of NVIDIA's 165 MB
+`nvngx_dlssnr.dll` and got **61 parameters**. What is there:
+
+colour, depth (and a depth-inverted flag), motion vectors and their scales, output, width and
+height, a scaling ratio, a back buffer, a **control mask**, a bidirectional distortion field, a UI
+layer with alpha and a correction flag, enabled, reset, style, a render preset hint, intensity,
+local structure, local tone, skin structure, an auto-mask flag — each with a subrect where it is a
+resource.
+
+What is **not** there, and matters:
+
+- **No jitter.** The string "jitter" does not occur anywhere in the binary. `DLSSNR.JitterOffsetX/Y`
+  was copied from RenoDX's add-on into our v0.5.1 and described there as a fix; this model build
+  does not read it. Whatever the switch sends goes nowhere.
+- **No input/output size family, no upscaling flag** that is honoured — see above.
+- **No `GlobalToneStrength`**, though RenoDX's own settings file carries one.
+- **No albedo, normal, roughness, specular, metallic, diffuse, G-buffer or irradiance input.**
+  NVIDIA's official integration feeds the model colour, surface albedo, detailed lighting and
+  surface normals from the engine's G-buffer. **We cannot.** We hook after the upscaler, where
+  albedo and normals no longer exist, and this model build has no parameter to accept them if we
+  had them. That is a ceiling on what any injector can do, ours included.
+
+### The control mask does nothing here
+
+`DLSSNR.ControlMask` sits beside `UseAutoMask` in the parameter list — the engine-level masking
+NVIDIA describes. We painted one and handed it over. It is inert.
+
+Five variants, all measured on the same wall:
+
+| what the mask said | how it was bound | what changed |
+|---|---|---|
+| left half zero, right half one, auto mask on | at evaluate | boundary step 0.226 against a frame median of 0.173 — the largest steps in the frame were scene edges elsewhere |
+| the same, auto mask off | at evaluate | 0.058 against a median of 0.177 — less than the median |
+| all zero ("do nothing anywhere") | at evaluate | high-frequency energy 21.1 with the model on, 11.5 with it off |
+| all zero | **at create** as well | cloth detail 32.59 against 10.99 with the model off, on a *closer* crop |
+| all one | **at create** as well | 29.47 against 9.54 |
+
+The fourth and fifth rows are the ones that matter: this tree's own forwarder documents that the
+model reads its parameters once, when it builds the feature, so binding only at evaluate proves
+nothing. Bound at create, with the mask telling it to do nothing anywhere, the model ran at full
+strength. Both polarities tested, so it is not inverted — it is unread.
+
+The `MaskTest` key that painted those masks is a diagnostic and is not in the release build.
+
+## What the passes must not share
+
+One history was the finding that closed the gap. It also introduced one of our own.
+
+Passes two and up re-evaluate the *same frame*. The picture has not moved between them, so the
+honest displacement is zero. We were handing every pass the frame's own motion vectors, which asked
+one shared history to be warped once per pass — four times, at four passes, for one frame of real
+movement. Where the model has pixels to correct from it hides the error; in shadow it has almost
+none and leans on the history.
+
+`StillMv`, on by default, gives the sharing passes zero motion. Measured with a five-shot ladder at
+a fixed camera, one switch changed at a time, reading the darkest 15% of the frame:
+
+| | brightness | standard deviation |
+|---|---|---|
+| model off | 9.66 | 5.02 |
+| shared history, motion sent to every pass | 27.05 | 38.89 |
+| shared history, `StillMv` | **24.99** | **36.94** |
+
+Both numbers move back toward the base, and that switch is the only difference between those two
+frames. It costs about 1.2 of the 2.8 of high-frequency energy the shared history adds. Walking and
+turning through shadow with it on: no trailing.
+
+**What this does not prove.** It was motivated by shadow flicker, measured from a still 13-second
+capture where temporal standard deviation peaked at 52 against a scene mean of 1.4, every hot block
+dark. On the retest the flicker did not reproduce with the switch either way. The link to that
+flicker stays a hypothesis. What the change demonstrably does is put less invented energy into
+shadow.
+
+It may also be why turning the shared history off was steady: separate histories are each warped
+once a frame, with the right vectors. Sharing is not the fault. Lying about motion is.
+
+## Measured against RenoDX's add-on, matched
+
+The add-on that drives the same model, at the same seam, is the only reference we have. Once its
+defaults were matched on our side (intensity 1.0, local tone 1.0, local structure 1.0, skin 1.0,
+auto mask on), from the same save, at the same camera — alignment `dy=2 dx=0`, normalised
+cross-correlation up to 0.944 — and the same pass counts:
+
+| gain over each one's own base | this fork | RenoDX |
+|---|---|---|
+| texture, 1 pass | +9.11 | +7.22 |
+| texture, 2 passes | +21.41 | +17.68 |
+| texture, 3 passes | +31.43 | +28.62 |
+| grain on flat wood, 1 pass | +8.95 | +7.84 |
+| grain on flat wood, 2 passes | +30.87 | +22.43 |
+| grain on flat wood, 3 passes | +47.73 | +42.61 |
+
+**Read that honestly: it is the same design at a different volume.** We add more of everything —
+more texture where there is detail, and as much more grain where the wood is flat. The one real
+difference is at two passes and it favours RenoDX: 17.68 of texture for 22.43 of grain, against our
+21.41 for 30.87. At one and three passes the ratios tie.
+
+An observer had reported our multi-pass as much inferior at the same cost. That report was correct
+and it is what started all of this — but by the time the seams and the settings were actually
+matched, what was left of the difference was **our intensity setting**, which was at 1.5 against
+their default of 1.0. The eye that reported it settled at 0.67.
+
+### Both wash shadows, and that is the model
+
+Taking the darkest 15% of the frame with the model off and reading the same pixels with it on:
+
+| shadow lift over own base | this fork | RenoDX |
+|---|---|---|
+| 1 pass | +20.23 | +19.00 |
+| 2 passes | +23.53 | +21.01 |
+| 3 passes | +23.14 | +24.52 |
+
+Both bases were the same darkness (10.04 against 11.46), so this is comparable. The darkest part of
+the frame goes from about 10 to about 30 and its variance grows sevenfold. That is the model's own
+behaviour, in both, and it is the most visible artefact either produces. We have no fix for it.
+
+### RenoDX's Upscaled hook and Frame Generation crash the GPU
+
+Not our bug, published because it cost us an afternoon. With that add-on's hook point set to
+*Upscaled* and DLSS-G active, the game died about two seconds after startup with an Unreal
+`GPUCrash` — no Windows fault event, no Streamline minidump, a device removal. Its log runs clean
+until `captured first loaded-module D3D12 reconstruction evaluation (slot 0)`, the moment the hook
+latches onto the DLSS output, and stops about 100 ms later. Its own log says `replace_source=true`:
+it writes into the buffer Frame Generation consumes. **With Frame Generation off, the same
+configuration ran 3.5 minutes and 19,000 evaluations clean.**
 
 ## What the ladder actually buys
 
@@ -268,6 +404,11 @@ caught it; ours had no reference.
   at full strength beat three laddered ones on grain and on stability, for six milliseconds less.
   Both controls remain and both still do what they say — they are no longer the first thing to reach
   for.
+- **We shipped a fix for something the model cannot receive.** v0.5.1's headline was that the jitter
+  was now being sent to the model. Pulling every parameter name out of the model's own binary shows
+  it has no jitter input at all — the string does not occur in 165 MB. The name came from RenoDX's
+  add-on and was taken on trust. It was reported as making no visible difference, which was true and
+  should have been the clue rather than the footnote.
 - **Reading a parameter block says who wrote, not what is supported.** The size family above was
   first declared missing because `DLSSNR.InputWidth` and the rest read back
   `FAIL_UnsupportedParameter`. They read back that way because nobody had written them:
@@ -312,16 +453,27 @@ wide and the pattern in it is what we are missing.
 | Model runs | `Placement` | 0 = after the upscaler (display resolution) · 1 = before it (render resolution) | 0 — 1 is for a card that cannot afford 0 |
 | Colour guard | `ChromaGuard` | how far a pixel's colour may travel from the frame's, as a ratio; below 1.0 it does not run | 1.00 — holds the hue to the game's, which is what stopped the magenta |
 | UI correction | `UiCorrection` | whether the model corrects for a drawn interface it is not given | false — on until v0.5.0 and invisible either way |
-| Jitter | `Jitter` | hand the model the game's sub-pixel camera offset | true — confirmed arriving, no visible difference |
+| Jitter | `Jitter` | sends `DLSSNR.JitterOffsetX/Y` | **this model build has no such parameter** — the switch does nothing, see above |
 | One history | `SharedHistory` | every full-size pass on one model feature, sharing one history, instead of one each | true from v0.5.2 — a reduced pass keeps its own, so the ladder still works |
 | Tone on every pass | `ToneEveryPass` | send Local tone to every pass, not only the first | true from v0.5.2 — halve the value against what you used on one pass |
+| Later passes see no motion | `StillMv` | the passes that share the history are given zero motion, because between them the frame has not moved | true from v0.5.2 — only applies to passes that share; a reduced pass keeps its own history and its own vectors |
 | Scale test | `ScaleTest` | diagnostic: asks at feature creation whether the model takes an input below its output, on a throwaway feature, and logs it | 0 — the answer is in the section above and it is no |
 
-Model tuning we ship: Intensity 1.5 (1.4 on REDkit), Local structure 1.1, Local tone 0.8, Skin 1.2
-(0.89 on REDkit), Preset 3, auto skin mask, Detail strength 1.1, Colour 1.0. With `ToneEveryPass` on
-and more than one pass, Local tone arrives once per pass — 0.5 across two is about what 0.8 across
-one was. Style is taste per
-scene: Natural for realism, Cinematic for punch, Default for "no filter".
+**Recommended look**, the button beside the Intensity slider, fills the four strengths and the three
+switches at once: Intensity **0.67**, Local structure **1.26**, Local tone **0.25**, Skin structure
+**1.09**, with One history, Tone on every pass and Later passes see no motion all on. *Model default*
+beside it puts the four back where NVIDIA ships them (1, 1, 1, and −1 for skin, which means follow
+local structure rather than a strength of zero) and leaves the switches alone.
+
+Intensity sits below NVIDIA's own default of 1 on purpose. Everything through v0.5.1 shipped 1.5,
+and measured against the same scene at 1.0 the higher setting added more of *everything* — more
+texture where there was detail, and as much more grain where the wood was flat. Local structure goes
+the other way because it carries detail without the brightness lift that washes shadow. Local tone is
+0.25 rather than the 0.5 that felt right with tone on the first pass only, because with tone on every
+pass it enters once per pass: 0.5 across two sits about where 0.8 across one did, which at three
+passes puts 0.5-on-one near 0.23 each.
+
+Style is taste per scene: Natural for realism, Cinematic for punch, Default for "no filter".
 
 Changing a pass's resolution rebuilds that pass's model feature, so the picture pops for a couple of
 frames. That is the rebuild, not the setting — judge the image a second after you let go.
