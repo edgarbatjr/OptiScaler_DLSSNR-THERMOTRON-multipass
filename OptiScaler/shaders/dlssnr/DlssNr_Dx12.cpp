@@ -2842,9 +2842,14 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // per-preset remap without restarting the game for every value. Now moving the slider produces
     // the next row of the table, and the mapping falls out of one session.
     //
-    // That 1.4 -> 0.84 is real and it is not ours: the forwarder writes the number we were given,
-    // create() returns success, and the block afterwards holds something else. Whatever the model
-    // does to it, the menu has been showing a number the model is not using.
+    // Read these knowing what produced them. The report fires after the LAST pass of the chain, and
+    // every later pass scales intensity, local structure and skin by its own decay before writing
+    // them -- while local tone is set to zero on every pass but the first, deliberately. So with
+    // PassDecay4 at 0.6 the block holds 0.6 times what the menu says, and local tone holds nothing.
+    //
+    // That is this code, not the model. It was briefly written up here as the model clamping its
+    // inputs, on the strength of three parameters sharing one ratio and nobody checking the pass
+    // scaling ten lines further up. The model received exactly what it was sent.
     static bool tuningReported = false;
     static float lastReportedIntensity = -1.0f;
     static uint32_t lastReportedPreset = 0xFFFFFFFFu;

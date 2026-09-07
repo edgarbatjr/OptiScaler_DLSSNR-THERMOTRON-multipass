@@ -804,9 +804,10 @@ void RenderMenu(Config* config, float menuResScale)
                        "\nof what it was built for: it takes the number without checking it, so what"
                        "\nhappens up there is undefined rather than 'more'. This slider went to 2 with"
                        "\nnothing saying that, which is how 1.4 came to look like a normal setting."
-                       "\n\nAnd the model does not necessarily keep what it is given: written 1.4, the"
-                       "\nparameter block afterwards held 0.84. The log reports what it kept every time"
-                       "\nthis moves -- search it for 'readback'.");
+                       "\n\nWhat the model actually received is in the log every time this moves --"
+                       "\nsearch it for 'readback'. Read it knowing that later passes scale this by"
+                       "\ntheir own strength, so the number there is this one times that pass's"
+                       "\ndecay, not evidence the model changed anything.");
 
         DeferredSlider("Local structure", &config->DlssNrLocalStructure, 0.0f, 2.0f, 1.0f);
 
