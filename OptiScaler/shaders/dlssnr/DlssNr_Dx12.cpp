@@ -2895,6 +2895,23 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                          NgxResultName((unsigned int) ru), f, NgxResultName((unsigned int) rf));
             };
 
+            // Reading first only proves who has written. DLSSNR.Width answers because the forwarder's
+            // create writes it; the rest answering FAIL_UnsupportedParameter says nobody wrote them,
+            // which is not the same as the block refusing them -- a distinction the first version of
+            // this probe could not make, and which it read as an answer when it was not one.
+            //
+            // So write the identity first: input the same as output, no upscaling, scale one. That is
+            // exactly what this pass already does, so if the model reads these nothing changes, and if
+            // it does not they are inert. Then read back. A value that survives means the block keeps
+            // the name; FAIL after a write means it refuses it.
+            g_nr.capabilityParams->Set("DLSSNR.InputWidth", (unsigned int) workWidth);
+            g_nr.capabilityParams->Set("DLSSNR.InputHeight", (unsigned int) workHeight);
+            g_nr.capabilityParams->Set("DLSSNR.OutputWidth", (unsigned int) workWidth);
+            g_nr.capabilityParams->Set("DLSSNR.OutputHeight", (unsigned int) workHeight);
+            g_nr.capabilityParams->Set("DLSSNR.Upscaling", (unsigned int) 0);
+            if (g_nr.probeFloat != nullptr && g_nr.floatSlot >= 0)
+                g_nr.probeFloat(g_nr.capabilityParams, "DLSSNR.Scale", 1.0f, g_nr.floatSlot);
+
             ask("DLSSNR.Width");
             ask("DLSSNR.Height");
             ask("DLSSNR.InputWidth");
