@@ -278,18 +278,18 @@ class Config
     // swapchain and disables it "for native DLSS/DLAA and HUD-less sources", which is this.
     //
     // It shipped hardcoded on through every release, and was then hardcoded off, which is no better:
-    // a behaviour nobody can compare is a decree. Making it a setting is what allowed the question to
-    // be settled, and it was settled the same evening, by toggling it in one scene:
+    // a behaviour nobody can compare is a decree. It is a setting so the difference can be looked at.
     //
-    //     on  -> the picture flickers
-    //     off -> it does not
+    // It was looked at, on and off in one scene in Dawnwalker, and there was no visible difference
+    // either way. Off is still the better default -- this pass hands the model no UI layer, no alpha
+    // and no composited back buffer, so there is nothing for the correction to work from -- but that
+    // is reasoning, not a picture anyone can see. It is not a fix, and it fixes nothing known.
     //
-    // That flicker is the one this project had been chasing for weeks under other names -- shimmer on
-    // faces, "soft mask" on objects, worse with every added pass. It was the model correcting for an
-    // interface it had never been given, and a correction computed from nothing lands somewhere new
-    // every frame. Every release from v0.2.0 to v0.5.0 shipped with it on and no way to turn it off.
+    // It was briefly written up as the cause of the flicker this project has been chasing. That was a
+    // misreading: the observer was describing the momentary hitch when toggling the setting rebuilds
+    // the model, which is expected and which they had been warned about in the same breath.
     //
-    // Read when the model is built, so changing it rebuilds the feature.
+    // Read when the model is built, so changing it rebuilds the feature -- hence that hitch.
     CustomOptional<bool> DlssNrUiCorrection { false };
 
     // Whether the game's sub-pixel camera offset is passed to the model.
