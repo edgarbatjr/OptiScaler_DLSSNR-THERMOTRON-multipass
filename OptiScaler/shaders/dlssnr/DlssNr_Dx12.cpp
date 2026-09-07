@@ -2798,12 +2798,42 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         }
     }
 
-    // Once, a few seconds in, so it lands after the values have been written at least once.
+    // A few seconds in, so it lands after the values have been written at least once -- and again
+    // every time the tuning changes, which is the part that was missing.
+    //
+    // Reporting once a session made this readable and useless at the same time. It said "we wrote
+    // 1.4 and the model holds 0.84" and left it there: no way to tell a ceiling from a scale from a
+    // per-preset remap without restarting the game for every value. Now moving the slider produces
+    // the next row of the table, and the mapping falls out of one session.
+    //
+    // That 1.4 -> 0.84 is real and it is not ours: the forwarder writes the number we were given,
+    // create() returns success, and the block afterwards holds something else. Whatever the model
+    // does to it, the menu has been showing a number the model is not using.
     static bool tuningReported = false;
+    static float lastReportedIntensity = -1.0f;
+    static uint32_t lastReportedPreset = 0xFFFFFFFFu;
+    static uint32_t lastReportedStyle = 0xFFFFFFFFu;
 
-    if (!tuningReported && g_frames > 240)
+    const float intensityNow = Config::Instance()->DlssNrIntensity.value_or_default();
+    const uint32_t presetNow = Config::Instance()->DlssNrPreset.value_or_default();
+    const uint32_t styleNow = Config::Instance()->DlssNrStyle.value_or_default();
+
+    const bool tuningMoved = intensityNow != lastReportedIntensity || presetNow != lastReportedPreset ||
+                             styleNow != lastReportedStyle;
+
+    if ((!tuningReported || tuningMoved) && g_frames > 240)
     {
         tuningReported = true;
+        lastReportedIntensity = intensityNow;
+        lastReportedPreset = presetNow;
+        lastReportedStyle = styleNow;
+
+        // A header, so each block of readbacks below says which settings produced it. Without it the
+        // rows are unreadable the moment there is more than one of them: "0.84" means nothing unless
+        // the preset and style that were in force are on the same screen.
+        LOG_INFO("DLSS-NR readback at preset {}, style {}, model {}x{} -- what we asked for against "
+                 "what the model holds:",
+                 presetNow, styleNow, g_nr.workWidth, g_nr.workHeight);
 
         // At INFO, because whether the model actually took a value is the only way to tell a
         // control that does nothing from one that is not being written.
@@ -2811,8 +2841,9 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         {
             float value = 0.0f;
             const NVSDK_NGX_Result r = g_nr.capabilityParams->Get(name, &value);
-            LOG_INFO("DLSS-NR readback {} -> {} (we wrote {}, result 0x{:X})", name, value, wrote,
-                     (uint32_t) r);
+            const float ratio = wrote != 0.0f ? value / wrote : 0.0f;
+            LOG_INFO("DLSS-NR readback {} -> {} (we wrote {}, ratio {:.4f}, result 0x{:X})", name, value,
+                     wrote, ratio, (uint32_t) r);
         };
 
         const Config& rcfg = *Config::Instance();
