@@ -329,6 +329,14 @@ class Config
     // Off by default, so the behaviour every release has shipped is what you get until you change it.
     CustomOptional<bool> DlssNrToneEveryPass { false };
 
+    // Percentage: 50 asks the model, at feature creation, for an input half the width and height of
+    // its output. 0 is off, and off is the default -- the only thing this does is build one throwaway
+    // feature, log whether it was accepted, and release it. Nothing reaches the picture.
+    //
+    // It exists because cost is area, and an input smaller than the output is the only shape that
+    // could make this pass cheaper without making it softer.
+    CustomOptional<uint32_t> DlssNrScaleTest { 0 };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.
