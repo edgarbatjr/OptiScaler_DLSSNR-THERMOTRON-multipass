@@ -305,6 +305,30 @@ class Config
     // session, rather than against a memory of how last week looked.
     CustomOptional<bool> DlssNrJitter { true };
 
+    // Whether every pass runs on ONE model feature, sharing one history, instead of one feature per
+    // pass.
+    //
+    // This fork gave each pass its own feature deliberately: a repeated evaluate on a shared history
+    // was blamed for later passes losing detail. Measured against RenoDX's DLSS 5 add-on in The Blood
+    // of Dawnwalker, that add-on does the opposite and looks better doing it -- its log shows four
+    // CreateFeature calls against 1337 EvaluateFeature calls, so its two, three and four passes all
+    // run on one feature with one history.
+    //
+    // Off by default because our own reason for the split was an observation too, and nothing here is
+    // yet proven either way. On, the passes also stop being skipped on the frame a per-pass feature
+    // would have been built, because there is nothing left to build.
+    CustomOptional<bool> DlssNrSharedHistory { false };
+
+    // Whether Local tone is sent on every pass, or only on the first.
+    //
+    // Only on the first, until now: tone is a look, a look is applied once, and passing it every pass
+    // made the second re-grade an already-graded picture -- warmth and contrast stacked with the pass
+    // count while detail did not. RenoDX's add-on sends the same parameters on every pass; its log
+    // shows one options revision shared by all of a frame's evaluations.
+    //
+    // Off by default, so the behaviour every release has shipped is what you get until you change it.
+    CustomOptional<bool> DlssNrToneEveryPass { false };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.

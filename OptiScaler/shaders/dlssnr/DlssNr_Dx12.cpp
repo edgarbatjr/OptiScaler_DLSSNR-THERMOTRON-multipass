@@ -1930,7 +1930,10 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     for (unsigned int i = 0; i < kNrMaxPasses; ++i)
     {
         passScale[i] = passScale[i] < 0.25f ? 0.25f : (passScale[i] > 1.0f ? 1.0f : passScale[i]);
-        if (i >= passesWanted || i == 0)
+        // One history means one raster. A feature built for the working size cannot be evaluated at a
+        // smaller one, so sharing it forces every pass to full size -- which is also what the add-on
+        // this was measured against does: every evaluation in its log is the full 3840x2160.
+        if (i >= passesWanted || i == 0 || cfg.DlssNrSharedHistory.value_or_default())
             passScale[i] = 1.0f;
         passW[i] = (unsigned int) (workWidth * passScale[i] + 0.5f);
         passH[i] = (unsigned int) (workHeight * passScale[i] + 0.5f);
@@ -2624,12 +2627,21 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         Barrier(cmdList, modelInput, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
 
+    // One model feature for every pass, one history, as RenoDX's DLSS 5 add-on does -- measured in
+    // its own log: four CreateFeature calls against 1337 EvaluateFeature calls, with two, three and
+    // four passes per frame. This fork split them on purpose and the split has never been tested
+    // against the alternative in one scene. Off by default; the switch is what makes the test possible.
+    const bool sharedHistory = cfg.DlssNrSharedHistory.value_or_default();
+
     for (unsigned int pass = 0; pass < passes && result == 1; ++pass)
     {
         // Frame-ahead rule: a pass feature built on this very command list is not evaluated on it.
         // The pass is skipped (not run on the shared main feature -- that history clash is what
         // "loses detail on later passes" was) and starts from the next frame.
-        if (pass > 0 && (g_nr.passFeature[pass] == nullptr || g_nr.passFeatureFresh[pass]))
+        //
+        // Shared history has no per-pass feature to wait for, so there is nothing to skip: every pass
+        // runs from the first frame.
+        if (!sharedHistory && pass > 0 && (g_nr.passFeature[pass] == nullptr || g_nr.passFeatureFresh[pass]))
             continue;
 
         const bool chainPass = pass > 0 && mixedRun;
@@ -2716,13 +2728,20 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         // third re-graded that, so colour compounded while detail did not -- the passes visibly
         // stacked warmth and contrast, which is not what turning the count up is asking for.
         // Structure is the thing worth repeating; tone is not.
-        const float passTone = pass == 0 ? cfg.DlssNrLocalTone.value_or_default() : 0.0f;
+        const float passTone = (pass == 0 || cfg.DlssNrToneEveryPass.value_or_default())
+                                   ? cfg.DlssNrLocalTone.value_or_default()
+                                   : 0.0f;
         // Each pass on its own feature where one exists, so no history is shared. If a later one
         // failed to build, that pass falls back to the first rather than not running -- a repeated
         // pass on a shared history is worse than a separate one, but it is not nothing.
-        void* passUses = pass > 0 ? g_nr.passFeature[pass] : g_nr.feature;
-        const int passReset = pass == 0 ? (g_nr.reset ? 1 : 0) : (g_nr.passNeedsReset[pass] ? 1 : 0);
-        if (pass > 0)
+        void* passUses = (pass > 0 && !sharedHistory) ? g_nr.passFeature[pass] : g_nr.feature;
+        // Reset belongs to the frame. With one shared history there is one thing to reset and pass 0
+        // is where it happens; the later passes of the same frame must not throw away what it just
+        // established.
+        const int passReset = (pass == 0 || sharedHistory)
+                                  ? ((pass == 0 && g_nr.reset) ? 1 : 0)
+                                  : (g_nr.passNeedsReset[pass] ? 1 : 0);
+        if (pass > 0 && !sharedHistory)
             g_nr.passNeedsReset[pass] = false;
 
         // Per-pass decay. The silhouette glow is border contrast the model pulls, and N passes pull it

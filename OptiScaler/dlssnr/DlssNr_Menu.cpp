@@ -423,6 +423,47 @@ void RenderMenu(Config* config, float menuResScale)
 
             if (passes > 1)
             {
+                {
+                    bool sharedHistory = config->DlssNrSharedHistory.value_or_default();
+
+                    if (ImGui::Checkbox("One history", &sharedHistory))
+                        config->DlssNrSharedHistory = sharedHistory;
+
+                    HelpMarker("Whether every pass runs on ONE model feature, sharing one history."
+                               "\n\nOff, which is what every release has shipped: each pass gets its"
+                               "\nown feature and its own history. That split was deliberate -- a"
+                               "\nrepeated evaluate on a shared history was blamed here for later"
+                               "\npasses losing detail."
+                               "\n\nRenoDX\'s DLSS 5 add-on does the opposite, and its own log says so:"
+                               "\nfour CreateFeature calls against 1337 EvaluateFeature calls, with"
+                               "\ntwo, three and four passes a frame. Put next to this fork in one"
+                               "\nscene, at the same seam and the same cost, its picture was the one"
+                               "\npreferred -- finer texture, less halo, better skin, less soft."
+                               "\nOne observer, one scene, one night."
+                               "\n\nOne history means one raster: per-pass resolution is ignored while"
+                               "\nthis is on and every pass runs at the working size. Passes also"
+                               "\nstop being skipped on the frame a per-pass feature would have been"
+                               "\nbuilt, so the count you ask for is the count you get."
+                               "\n\nThe two have never been compared here in one scene. That is what"
+                               "\nthis switch is for.");
+                }
+
+                {
+                    bool toneEvery = config->DlssNrToneEveryPass.value_or_default();
+
+                    if (ImGui::Checkbox("Tone on every pass", &toneEvery))
+                        config->DlssNrToneEveryPass = toneEvery;
+
+                    HelpMarker("Whether Local tone is sent to every pass, or only to the first."
+                               "\n\nOnly the first, until now, on the reasoning that tone is a look"
+                               "\nand a look is applied once: sent every pass, the second re-grades"
+                               "\nan already-graded picture and the third re-grades that, so warmth"
+                               "\nand contrast stack with the pass count while detail does not."
+                               "\n\nRenoDX\'s add-on sends the same parameters on every pass -- all of"
+                               "\na frame\'s evaluations share one options revision in its log."
+                               "\n\nOff is exactly what every earlier release did.");
+                }
+
                 float decay2 = config->DlssNrPassDecay2.value_or_default();
                 if (ImGui::SliderFloat("Pass 2 strength", &decay2, 0.0f, 1.5f, "%.2f x"))
                     config->DlssNrPassDecay2 = decay2;

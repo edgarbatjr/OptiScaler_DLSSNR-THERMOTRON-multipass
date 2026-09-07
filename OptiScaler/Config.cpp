@@ -367,6 +367,8 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrAutoMask.set_from_config(readBool("DlssNr", "AutoMask"));
             DlssNrUiCorrection.set_from_config(readBool("DlssNr", "UiCorrection"));
             DlssNrJitter.set_from_config(readBool("DlssNr", "Jitter"));
+            DlssNrSharedHistory.set_from_config(readBool("DlssNr", "SharedHistory"));
+            DlssNrToneEveryPass.set_from_config(readBool("DlssNr", "ToneEveryPass"));
             DlssNrReversibleMode.set_from_config(readUInt("DlssNr", "ReversibleMode"));
             DlssNrEdgeGuardMode.set_from_config(readUInt("DlssNr", "EdgeGuardMode"));
             DlssNrEdgeGuard.set_from_config(readFloat("DlssNr", "EdgeGuard"));
@@ -1274,6 +1276,10 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "UiCorrection",
                  GetBoolValue(Instance()->DlssNrUiCorrection.value_for_config()).c_str());
     ini.SetValue("DlssNr", "Jitter", GetBoolValue(Instance()->DlssNrJitter.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "SharedHistory",
+                 GetBoolValue(Instance()->DlssNrSharedHistory.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "ToneEveryPass",
+                 GetBoolValue(Instance()->DlssNrToneEveryPass.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ReversibleMode", GetIntValue(Instance()->DlssNrReversibleMode.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeGuardMode", GetIntValue(Instance()->DlssNrEdgeGuardMode.value_for_config()).c_str());
     ini.SetValue("DlssNr", "EdgeGuard", GetFloatValue(Instance()->DlssNrEdgeGuard.value_for_config()).c_str());
