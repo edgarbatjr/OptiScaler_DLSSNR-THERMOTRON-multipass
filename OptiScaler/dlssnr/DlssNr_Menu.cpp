@@ -1037,6 +1037,59 @@ void RenderMenu(Config* config, float menuResScale)
                    "\n\nRead when the model is built, so a change rebuilds it after a moment. The"
                    "\nnames come from community testing; NVIDIA ships no names in the binaries.");
 
+        // A look, not a cost. The preset row above buys model runs; this one fills in the four
+        // strength knobs and the three switches with a setting that was arrived at by eye and then
+        // checked against the numbers, on one machine and one game. It is a starting point to argue
+        // with, not a claim.
+        //
+        // Intensity 0.67 is below NVIDIA's own default and below the add-on's. It got there because
+        // 1.50 measured as more of everything -- more texture on detail AND more invented grain on
+        // flat wood, in the same proportion -- and because the eye that had to look at it said the
+        // sharpening was too much. Local structure carries detail without the brightness lift that
+        // washes shadow, so it goes up rather than down.
+        //
+        // Local tone is 0.25 rather than the 0.50 that felt right with tone on the first pass only,
+        // because with tone on every pass it enters once per pass. The measured dose rule is that
+        // 0.5 across two passes sits about where 0.8 across one did; carried to three passes that
+        // puts 0.50-on-one at about 0.23 each, and 0.25 is the round number next to it.
+        if (ImGui::Button("Recommended look"))
+        {
+            config->DlssNrIntensity = 0.67f;
+            config->DlssNrLocalStructure = 1.26f;
+            config->DlssNrLocalTone = 0.25f;
+            config->DlssNrSkinStructure = 1.09f;
+            config->DlssNrSharedHistory = true;
+            config->DlssNrToneEveryPass = true;
+            config->DlssNrStillMv = true;
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Model default"))
+        {
+            config->DlssNrIntensity = 1.0f;
+            config->DlssNrLocalStructure = 1.0f;
+            config->DlssNrLocalTone = 1.0f;
+            config->DlssNrSkinStructure = -1.0f;
+        }
+
+        HelpMarker("Recommended look fills the four strengths below and the three multi-pass"
+                   "\nswitches. It is one person's eye on one machine in one game, checked against"
+                   "\nmeasurements from the same afternoon -- a starting point to argue with."
+                   "\n\nIntensity 0.67, Local structure 1.26, Local tone 0.25, Skin structure 1.09,"
+                   "\nwith One history, Tone on every pass and Later passes see no motion all on."
+                   "\n\nIntensity sits below NVIDIA's default of 1 on purpose. Measured at 1.50"
+                   "\nagainst the same scene at 1.00, the higher setting added more of everything:"
+                   "\nmore texture where there was detail, and just as much more grain where the"
+                   "\nwood was flat. Local structure goes the other way because it carries detail"
+                   "\nwithout the brightness lift that washes shadow."
+                   "\n\nLocal tone is 0.25 and not 0.50 because tone now enters once per pass. The"
+                   "\nmeasured rule is that 0.5 across two passes sits about where 0.8 across one"
+                   "\ndid; at three passes that puts 0.50-on-one near 0.23 each."
+                   "\n\nModel default puts the four strengths back where NVIDIA ships them: 1, 1, 1,"
+                   "\nand -1 for skin, which means follow local structure rather than a strength of"
+                   "\nzero. It leaves the switches alone.");
+
         DeferredSlider("Intensity", &config->DlssNrIntensity, 0.0f, 2.0f, 1.0f);
 
         HelpMarker("The model's own strength control, applied inside it. Distinct from detail"
