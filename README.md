@@ -75,6 +75,47 @@ budget allows, and spend what is left on one reduced pass, which is the cheap wa
 Photo holds the later passes back less than the others — that restraint exists to protect motion,
 and on a still it only costs you shaping.
 
+Since v0.5.2 the first thing to reach for is not one of these but the section directly below. Two
+passes with every pass given the same parameters, and intensity raised, measured cheaper than the
+three-pass chain it was compared against and carried more grain than it.
+
+## The same parameters on every pass
+
+Until v0.5.2 a later pass was not given the same instructions as the first. Local tone was zeroed on
+every pass but the first, `PassDecay` weakened intensity and structure, and each pass ran on a model
+feature of its own with a history of its own. All three were invented here, to keep multi-pass under
+control.
+
+A reader on the Adrenaline forum reported this fork's 2x pass as "much inferior" to
+ReShade + RenoDX's DLSS 5 add-on at the same cost. Set side by side at the same seam, that was right.
+The add-on's own log says what it does differently: four CreateFeature calls against 1337
+EvaluateFeature calls — one feature, one history, every pass — and one options revision shared by all
+of a frame's evaluations, so every pass receives the same numbers.
+
+Given the same treatment, this changes. One scene at midday, five shots inside twenty-nine seconds,
+the camera untouched:
+
+| | passes | intensity | ms |
+|---|---|---|---|
+| the older chain | 3, laddered strength | 1.00 | 20.64 |
+| every pass identical | 2 | 1.00 | 14.94 |
+| every pass identical | 2 | 1.20 | 14.90 |
+| every pass identical | 2 | 1.40 | 13.86 |
+| every pass identical | 2 | **1.50** | **14.89** |
+
+From 1.20 up, the two-pass rows carry more grain in a log wall than the three-pass row, and the
+shimmer that made a third pass unpleasant is absent at all of them.
+
+**Intensity costs nothing and a pass costs about six milliseconds.** Across that whole ladder the
+measurement does not move. Passes were being spent on what a slider gives away.
+
+`SharedHistory` and `ToneEveryPass` are on from v0.5.2, and both are switches, so every earlier
+release's behaviour is one click away in *Cost*. A pass at the working size shares the feature; a
+reduced pass keeps its own, because a feature built for one raster cannot be evaluated at another —
+so the resolution ladder and the preset costs above are unaffected.
+
+One GPU, one scene, one pair of eyes.
+
 ## What a pass costs
 
 Fitted on an RTX 5090 at 4K in The Blood of Dawnwalker, using the menu's own ms readout:
@@ -243,7 +284,17 @@ caught it; ours had no reference.
 - **A blink when you toggle a setting is the setting changing, not the setting working.** Two of the
   changes in v0.5.1 rebuild the model feature, which costs a visible hitch. That hitch was briefly
   mistaken for the effect.
-
+- **Tone is a model parameter, not a colour filter.** Local tone was zeroed on every pass but the
+  first, so that a look would not be applied twice. What that actually did was run pass two with a
+  different model configuration from the one that had produced the picture pass two was handed.
+  Sending it on every pass is the single change that closed the gap reported against RenoDX's
+  add-on. Watch the dose: arriving twice at 1.0 read as wax on skin, and 0.5 across two passes sits
+  about where 0.8 on one did.
+- **`PassDecay` and the resolution ladder were compensating for that.** Later passes were weakened
+  and shrunk because multi-pass compounded glow and shimmer. Given the same instructions, two passes
+  at full strength beat three laddered ones on grain and on stability, for six milliseconds less.
+  Both controls remain and both still do what they say — they are no longer the first thing to reach
+  for.
 - **Reading a parameter block says who wrote, not what is supported.** The size family above was
   first declared missing because `DLSSNR.InputWidth` and the rest read back
   `FAIL_UnsupportedParameter`. They read back that way because nobody had written them:
@@ -289,9 +340,14 @@ wide and the pattern in it is what we are missing.
 | Colour guard | `ChromaGuard` | how far a pixel's colour may travel from the frame's, as a ratio; below 1.0 it does not run | 1.00 — holds the hue to the game's, which is what stopped the magenta |
 | UI correction | `UiCorrection` | whether the model corrects for a drawn interface it is not given | false — on until v0.5.0 and invisible either way |
 | Jitter | `Jitter` | hand the model the game's sub-pixel camera offset | true — confirmed arriving, no visible difference |
+| One history | `SharedHistory` | every full-size pass on one model feature, sharing one history, instead of one each | true from v0.5.2 — a reduced pass keeps its own, so the ladder still works |
+| Tone on every pass | `ToneEveryPass` | send Local tone to every pass, not only the first | true from v0.5.2 — halve the value against what you used on one pass |
+| Scale test | `ScaleTest` | diagnostic: asks at feature creation whether the model takes an input below its output, on a throwaway feature, and logs it | 0 — the answer is in the section above and it is no |
 
 Model tuning we ship: Intensity 1.5 (1.4 on REDkit), Local structure 1.1, Local tone 0.8, Skin 1.2
-(0.89 on REDkit), Preset 3, auto skin mask, Detail strength 1.1, Colour 1.0. Style is taste per
+(0.89 on REDkit), Preset 3, auto skin mask, Detail strength 1.1, Colour 1.0. With `ToneEveryPass` on
+and more than one pass, Local tone arrives once per pass — 0.5 across two is about what 0.8 across
+one was. Style is taste per
 scene: Natural for realism, Cinematic for punch, Default for "no filter".
 
 Changing a pass's resolution rebuilds that pass's model feature, so the picture pops for a couple of
