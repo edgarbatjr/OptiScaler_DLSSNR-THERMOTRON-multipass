@@ -254,7 +254,7 @@ and it is what started all of this — but by the time the seams and the setting
 matched, what was left of the difference was **our intensity setting**, which was at 1.5 against
 their default of 1.0. The eye that reported it settled at 0.67.
 
-### Both wash shadows, and that is the model
+### What the model does to shadow is a local tone remap, not a wash
 
 Taking the darkest 15% of the frame with the model off and reading the same pixels with it on:
 
@@ -264,9 +264,70 @@ Taking the darkest 15% of the frame with the model off and reading the same pixe
 | 2 passes | +23.53 | +21.01 |
 | 3 passes | +23.14 | +24.52 |
 
-Both bases were the same darkness (10.04 against 11.46), so this is comparable. The darkest part of
-the frame goes from about 10 to about 30 and its variance grows sevenfold. That is the model's own
-behaviour, in both, and it is the most visible artefact either produces. We have no fix for it.
+Both bases were the same darkness (10.04 against 11.46), so this is comparable, and for a while we
+described it as both mods washing shadow. **That description was wrong**, and the aggregate is what
+hid it. Split the dark pixels by how far they sit from the nearest lit pixel and the lift is not
+spread at all — measured at four passes, model off as the base, with the game's post chain disabled
+so nothing downstream could smear the result:
+
+| dark pixels | base | lift at 4 passes |
+|---|---|---|
+| within 8 px of light — the contact shadow | 8.81 | **+13.21** |
+| 8 to 25 px | 5.58 | +6.80 |
+| beyond 25 px — real occlusion | 5.81 | **-0.15** |
+
+**The black stays black.** What moves is the transition, which is where ambient occlusion lives. The
+same shape appears when the pixels are binned by brightness instead of distance: the lift peaks at a
+base value of about 14 (+16.98), falls off toward both ends, and turns slightly negative in the
+mid-tones (-3.94 at a base of 94). The whole-frame mean moves by +3.2, so this is not exposure.
+
+That is a dodge-and-burn curve — which is what the model's own `LocalTone` parameter is named for.
+Whether a real contact shadow should be that soft is an aesthetic call and not ours to make; what is
+measured is that the edit is structured and deliberate, not a black-level lift. The credit for
+seeing it belongs to the eye, not the metric: it was reported as *the model is softening a contact
+shadow that was too hard to begin with, and that is ambient occlusion's job* before it was measured.
+
+**One asymmetry worth knowing.** Run the same table on `before` at four passes and the shadow half
+matches, but the top half does not: mid-tones and highlights come down by about 20 levels across the
+board (-20.42, -20.30, -18.47 against `after`'s -3.94, -0.41, +0.76), and the frame mean falls 9.5.
+`after` does not do this. Unexplained so far, and a better candidate for what makes `before` look
+worse than anything else we have measured.
+
+### The game's post chain clips how much of the model reaches the screen
+
+Our hook is at the NGX evaluate, before the interface is drawn and before the tonemapper. Film
+grain, chromatic aberration, `r.Tonemapper.Sharpen`, bloom, depth of field and lens flare are all
+applied **on top of** what the model just wrote. Lumen, ray tracing, ambient occlusion, textures and
+LOD are upstream of it and are the model's raw material instead.
+
+Measured in The Blood of Dawnwalker at DLAA, same camera across both rounds (cross-correlation
+0.982), by how far the one-pass to four-pass ladder opens:
+
+| | post chain on | post chain off |
+|---|---|---|
+| `after` | ×1.470 | **×1.714** |
+| `before` | ×1.453 | ×1.446 |
+
+**At `after`, taking the post chain out delivers about 17% more of the model's work to the screen**,
+and the gain is present in all four horizontal quarters of the frame, so it is not just depth of
+field sharpening the background. At `before` nothing changes, because its output still has to cross
+the upscaler's own temporal reconstruction, and that ceiling is the tighter of the two.
+
+This also revises what an earlier DLAA test concluded. At matched working size the two placements
+had looked equivalent; they were equivalent because the post chain was clipping both to the same
+level. With it out of the way, `after` gains +994.6 of texture over the neutral base at four passes
+against `before`'s +649.9.
+
+**So: if you run at `after`, turn the game's post-processing off.** In this game that is
+`r.FilmGrain=0`, `r.Tonemapper.Sharpen=0`, `r.BloomQuality=0`, `r.DepthOfFieldQuality=0`,
+`r.SceneColorFringeQuality=0` in `Engine.ini`. You get roughly a third more of what the
+milliseconds already bought.
+
+Two honest limits. The metric counts invented grain the way it counts recovered detail, and removing
+film grain changes the high-frequency floor of everything — the ratio test is built to survive an
+additive floor, and the `before` control, which did not move at all, is what rules that explanation
+out. And turning these off changes the look the game's art direction chose; more of the model
+arriving is not the same claim as a better picture.
 
 ### RenoDX's Upscaled hook and Frame Generation crash the GPU
 
@@ -379,6 +440,14 @@ The area term is real; there is a second term for the frame around it that we ha
 frame you can go to 67% and barely see it. In motion, faces and small objects start to shimmer: the
 game jitters its camera every frame, and a reduced raster lands on a different phase each time.
 79–80% was where it stopped, measured by eye on a 5090 in one game. Test yours.
+
+**The aggregate hid the shape.** For three days this file said both mods *wash shadows* — the
+darkest 15% of the frame goes from about 10 to about 30, so it looked like a black-level lift. It is
+not. Split those same pixels by distance from the nearest lit pixel and the deep occlusion does not
+move at all; the whole lift sits in the contact-shadow transition. One number over a large mask can
+be perfectly correct and still describe the wrong mechanism. Decompose before you name a cause — and
+the decomposition here was suggested by the eye, which had already said the model was softening a
+contact shadow rather than lifting black.
 
 **A detail metric is not a quality metric.** We measured per-block luminance variation and it told
 us the before-upscaler mode had 22% *more* detail at matched cost. It does not: noise, ringing and
