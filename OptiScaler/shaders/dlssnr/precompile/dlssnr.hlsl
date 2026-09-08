@@ -1333,22 +1333,48 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         // A local mean, not this pixel's own luminance. The measurement was made on blocks, and a
         // per-pixel gate would follow the texture rather than the light: every dark speck inside a
         // lit surface would lose the model, which is a sharpening artefact, not a mask.
-        const float2 maskStep = float2(1.0 / max((float) gWidth, 1.0), 1.0 / max((float) gHeight, 1.0)) *
+        // Two rings and a centre rather than a 3x3 grid.
+        //
+        // The grid was the first version and it was wrong in a way that showed: nine point samples on
+        // an axis-aligned lattice, spaced a couple of dozen pixels apart, is a badly undersampled
+        // mean. It moves in steps as the lattice crosses a feature, so the mask picked up a
+        // cross-hatch of the log rows and the straw -- it followed the TEXTURE, which is the one thing
+        // a lighting mask must not do, and it would have printed that hatch onto the picture.
+        //
+        // Sixteen taps on two rings, the outer one turned half a step against the inner, is isotropic:
+        // no axis is privileged, so there is no lattice to beat against the scene's own lines.
+        const float2 maskUnit = float2(1.0 / max((float) gWidth, 1.0), 1.0 / max((float) gHeight, 1.0)) *
                                 max(gLumaMaskRadius, 1.0);
         float maskSum = 0.0;
+        float maskWeight = 0.0;
 
-        [unroll] for (int my = -1; my <= 1; ++my)
         {
-            [unroll] for (int mx = -1; mx <= 1; ++mx)
+            const float3 c = gOriginal.SampleLevel(gLinear, cmpUv, 0).rgb / normScale;
+            maskSum += 2.0 * dot(max(c, 0.0), kLuma);
+            maskWeight += 2.0;
+        }
+
+        [unroll] for (int ring = 0; ring < 2; ++ring)
+        {
+            // Inner ring at half the radius and weighted twice as heavily: the estimate should lean on
+            // the light near the pixel and only be steadied by the light further out.
+            const float rad = ring == 0 ? 0.5 : 1.0;
+            const float w = ring == 0 ? 2.0 : 1.0;
+            const float turn = ring == 0 ? 0.0 : 0.3927; // half a step of eight, in radians
+
+            [unroll] for (int i = 0; i < 8; ++i)
             {
+                const float a = 0.7854 * (float) i + turn;
                 const float3 tap =
-                    gOriginal.SampleLevel(gLinear, cmpUv + float2(mx, my) * maskStep, 0).rgb / normScale;
-                maskSum += dot(max(tap, 0.0), kLuma);
+                    gOriginal.SampleLevel(gLinear, cmpUv + float2(cos(a), sin(a)) * rad * maskUnit, 0).rgb /
+                    normScale;
+                maskSum += w * dot(max(tap, 0.0), kLuma);
+                maskWeight += w;
             }
         }
 
         // Display-referred, because that is the space the thresholds above were measured in.
-        const float maskLuma = LinearToSrgb(float3(maskSum / 9.0, 0.0, 0.0)).x;
+        const float maskLuma = LinearToSrgb(float3(maskSum / max(maskWeight, 1e-4), 0.0, 0.0)).x;
         const float maskLo = min(gLumaMaskLow, gLumaMaskHigh - 1e-4);
         const float maskT = saturate((maskLuma - maskLo) / max(gLumaMaskHigh - maskLo, 1e-4));
 
