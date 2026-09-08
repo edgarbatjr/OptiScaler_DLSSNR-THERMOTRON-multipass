@@ -1005,6 +1005,81 @@ void RenderMenu(Config* config, float menuResScale)
                 config->DlssNrChromaGuard = 0.0f;
         }
 
+        // The luminance mask. Its own block: it is not a guard against a defect, it is where the
+        // measurement says the model stops paying for itself.
+        {
+            static const char* nrLumaMaskNames[] = { "Off", "Hold the edit back in shadow" };
+            int lumaMask = (int) config->DlssNrLumaMaskMode.value_or_default();
+
+            if (lumaMask < 0 || lumaMask > 1)
+                lumaMask = 0;
+
+            if (ImGui::Combo("Luminance mask", &lumaMask, nrLumaMaskNames, IM_ARRAYSIZE(nrLumaMaskNames)))
+                config->DlssNrLumaMaskMode = (uint32_t) lumaMask;
+
+            HelpMarker("How much of the model's edit survives, decided by how much light the frame has"
+                       "\nwhere it lands. Off is bit-identical to before this existed."
+                       "\n\nMeasured, not guessed. Against a 5760x3240 reference render of the same"
+                       "\nfrozen frame -- the same scene at 2.25x the pixels -- the picture was split"
+                       "\ninto blocks and each block asked how much of the reference's own fine detail"
+                       "\nit really carries. Sorted by the block's brightness:"
+                       "\n\n   darkest quarter    base 0.454   model 0.464    +0.9%"
+                       "\n                      base 0.769   model 0.823    +5.4%"
+                       "\n                      base 0.766   model 0.843    +7.7%"
+                       "\n   brightest quarter  base 0.777   model 0.889   +11.1%"
+                       "\n\nMonotone across ten bins, and normalised by each block's own true detail --"
+                       "\nso it is not the trivial 'bright things have more detail'. The structure the"
+                       "\nmodel INVENTS is flat across brightness. In shadow the edit is invention with"
+                       "\nno recovery behind it.");
+
+            if (lumaMask != 0)
+            {
+                float maskLow = config->DlssNrLumaMaskLow.value_or_default();
+                if (ImGui::SliderFloat("Shadow ends at", &maskLow, 0.0f, 0.6f, "%.2f"))
+                    config->DlssNrLumaMaskLow = maskLow;
+
+                HelpMarker("Display luminance at or below which the hold is fullest. The measured"
+                           "\ndarkest quarter of the frame ended around 0.25.");
+
+                float maskHigh = config->DlssNrLumaMaskHigh.value_or_default();
+                if (ImGui::SliderFloat("Full light at", &maskHigh, 0.05f, 1.0f, "%.2f"))
+                    config->DlssNrLumaMaskHigh = maskHigh;
+
+                HelpMarker("Display luminance at or above which the edit lands whole. Between the two"
+                           "\nthresholds the hold eases in smoothly, so it leaves no contour of its own"
+                           "\nacross a wall where the light crosses the line.");
+
+                float maskFloor = config->DlssNrLumaMaskFloor.value_or_default();
+                if (ImGui::SliderFloat("Left in shadow", &maskFloor, 0.0f, 1.0f, "%.2f"))
+                    config->DlssNrLumaMaskFloor = maskFloor;
+
+                HelpMarker("How much of the edit survives in the deepest shadow. Zero removes the model"
+                           "\nthere entirely, which is what the measurement alone would say -- it"
+                           "\nrecovers +0.9% there, which is nothing. But nothing is not the same as"
+                           "\nprettier: the model also cleans up what the upscaler left, and taking it"
+                           "\nall away can read as a different picture in the dark. The number is a"
+                           "\ncontrol and not a constant, on purpose.");
+
+                float maskRadius = config->DlssNrLumaMaskRadius.value_or_default();
+                if (ImGui::SliderFloat("Mask radius (px)", &maskRadius, 1.0f, 96.0f, "%.0f"))
+                    config->DlssNrLumaMaskRadius = maskRadius;
+
+                HelpMarker("How wide the local average of the light is, in pixels. The measurement was"
+                           "\nmade on blocks of about 130 pixels; the mask is deliberately tighter so"
+                           "\nit follows the lighting rather than the frame. Too small and it starts"
+                           "\nfollowing the texture instead, which is a sharpening artefact.");
+
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Reset##lumamask"))
+                {
+                    config->DlssNrLumaMaskLow = 0.20f;
+                    config->DlssNrLumaMaskHigh = 0.40f;
+                    config->DlssNrLumaMaskFloor = 0.40f;
+                    config->DlssNrLumaMaskRadius = 24.0f;
+                }
+            }
+        }
+
         ImGui::SeparatorText("Model");
 
         ImGui::TextUnformatted("Read when the model is built, so a change rebuilds it after a moment.");
@@ -1858,7 +1933,8 @@ void RenderMenu(Config* config, float menuResScale)
         }
 
         static const char* debugNames[] = { "Off", "Proxy (what the model sees)", "Model output (raw)",
-                                            "Difference (amplified)", "Edge guard band" };
+                                            "Difference (amplified)", "Edge guard band",
+                                            "Luminance mask (white = edit lands whole)" };
         int debugView = (int) config->DlssNrDebugView.value_or_default();
         if (ImGui::Combo("Debug view", &debugView, debugNames, IM_ARRAYSIZE(debugNames)))
             config->DlssNrDebugView = (uint32_t) debugView;

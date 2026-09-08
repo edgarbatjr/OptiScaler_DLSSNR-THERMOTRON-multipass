@@ -3248,6 +3248,11 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         resolveParams.EdgeThreshold = cfg.DlssNrEdgeThreshold.value_or_default();
         resolveParams.EdgeRadius = cfg.DlssNrEdgeRadius.value_or_default();
         resolveParams.ChromaGuard = cfg.DlssNrChromaGuard.value_or_default();
+        resolveParams.LumaMaskMode = cfg.DlssNrLumaMaskMode.value_or_default();
+        resolveParams.LumaMaskLow = cfg.DlssNrLumaMaskLow.value_or_default();
+        resolveParams.LumaMaskHigh = cfg.DlssNrLumaMaskHigh.value_or_default();
+        resolveParams.LumaMaskFloor = cfg.DlssNrLumaMaskFloor.value_or_default();
+        resolveParams.LumaMaskRadius = cfg.DlssNrLumaMaskRadius.value_or_default();
         resolveParams.DepthInverted = g_nr.guideDepthInverted ? 1u : 0u;
         resolveParams.ReversibleMode = cfg.DlssNrReversibleMode.value_or_default();
         resolveParams.ApplyModel = cfg.DlssNrApplyModel.value_or_default() ? 1u : 0u;

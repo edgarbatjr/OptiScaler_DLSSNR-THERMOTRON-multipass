@@ -35,6 +35,11 @@ cbuffer Params : register(b0)
     float gEdgeRadius;     // how far the band reaches from the silhouette, in output pixels
     uint  gDepthInverted;  // 1 when the game's depth is reversed (near = 1)
     float gChromaGuard;    // how far the chroma may travel from the frame's, as a ratio; <1 = off
+    uint  gLumaMaskMode;   // 0 off, 1 hold the edit back where the frame is dark
+    float gLumaMaskLow;    // display luminance at or below which the hold is fullest
+    float gLumaMaskHigh;   // display luminance at or above which the edit lands whole
+    float gLumaMaskFloor;  // how much of the edit survives in the deepest shadow, 0..1
+    float gLumaMaskRadius; // radius of the local mean, in pixels of this dispatch
 };
 
 // Bringing an impossible colour back into a possible one.
@@ -1299,6 +1304,68 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 
             result = bounded * rl;             // the model's own light, put back untouched
         }
+    }
+
+    // The luminance mask. Measured, not guessed.
+    //
+    // Against a 5760x3240 reference render of the same frozen frame -- the same scene the 4K frame
+    // shows, with 2.25x the pixels -- the picture was binned into blocks and each block asked how
+    // much of the reference's own fine detail it actually carries. Sorted by the block's brightness:
+    //
+    //     brightness      base carries   model carries   gain
+    //     darkest quarter     0.454          0.464       +0.9%
+    //                         0.769          0.823       +5.4%
+    //                         0.766          0.843       +7.7%
+    //     brightest quarter   0.777          0.889      +11.1%
+    //
+    // Monotone across ten bins, correlation +0.55 against block brightness, and the gain is
+    // normalised by each block's own true detail -- so it is not the trivial "bright things have
+    // more detail in them". The structure the model INVENTS, meanwhile, is flat across brightness.
+    //
+    // So in shadow the edit is invention with no recovery behind it, and holding it back there gives
+    // up nothing that was ever in the scene. That is the whole argument for this mask: it is not a
+    // taste control, it is where the measurement says the model stops paying for itself.
+    //
+    // It lands here, after everything, so it holds the replace modes too -- those never reach the
+    // composition's own strengths. Mode 0 does not run, and the pass stays bit-identical.
+    if (gLumaMaskMode != 0)
+    {
+        // A local mean, not this pixel's own luminance. The measurement was made on blocks, and a
+        // per-pixel gate would follow the texture rather than the light: every dark speck inside a
+        // lit surface would lose the model, which is a sharpening artefact, not a mask.
+        const float2 maskStep = float2(1.0 / max((float) gWidth, 1.0), 1.0 / max((float) gHeight, 1.0)) *
+                                max(gLumaMaskRadius, 1.0);
+        float maskSum = 0.0;
+
+        [unroll] for (int my = -1; my <= 1; ++my)
+        {
+            [unroll] for (int mx = -1; mx <= 1; ++mx)
+            {
+                const float3 tap =
+                    gOriginal.SampleLevel(gLinear, cmpUv + float2(mx, my) * maskStep, 0).rgb / normScale;
+                maskSum += dot(max(tap, 0.0), kLuma);
+            }
+        }
+
+        // Display-referred, because that is the space the thresholds above were measured in.
+        const float maskLuma = LinearToSrgb(float3(maskSum / 9.0, 0.0, 0.0)).x;
+        const float maskLo = min(gLumaMaskLow, gLumaMaskHigh - 1e-4);
+        const float maskT = saturate((maskLuma - maskLo) / max(gLumaMaskHigh - maskLo, 1e-4));
+
+        // Smoothstepped so the hold has no visible contour of its own. A linear ramp puts a straight
+        // edge across a wall wherever the light crosses the threshold, and the eye finds it.
+        const float hold = lerp(saturate(gLumaMaskFloor), 1.0, maskT * maskT * (3.0 - 2.0 * maskT));
+
+        // The mask itself, so it can be tuned by looking at it rather than by guessing. White is the
+        // edit landing whole, black is the floor.
+        if (gDebugView == 5)
+        {
+            gTarget[id.xy] = float4(hold * gDebugScale, hold * gDebugScale, hold * gDebugScale,
+                                    originalSample.a);
+            return;
+        }
+
+        result = lerp(original, result, hold);
     }
 
     // Back out of the normalised space the composition worked in.

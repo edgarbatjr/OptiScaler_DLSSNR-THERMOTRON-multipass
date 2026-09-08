@@ -225,6 +225,22 @@ struct alignas(256) DlssNrConstants
     // Below 1.0 the guard does not run and the pass is bit-identical to before it existed. Mirrored
     // last in the shader cbuffer.
     float ChromaGuard;
+
+    // The luminance mask: how much of the model's edit survives, as a function of how much light the
+    // frame has where it lands.
+    //
+    // Measured against a 5760x3240 reference render of the same frozen frame. Binned by block
+    // brightness, the fraction of the reference's own fine detail each picture carries went
+    // 0.454 -> 0.464 in the darkest quarter (+0.9%) and 0.777 -> 0.889 in the brightest (+11.1%),
+    // monotone across ten bins, while the structure the model invents stayed flat. In shadow the
+    // edit is invention with no recovery behind it.
+    //
+    // LumaMaskMode 0 leaves the pass bit-identical. Mirrored last in the shader cbuffer.
+    uint32_t LumaMaskMode;
+    float LumaMaskLow;
+    float LumaMaskHigh;
+    float LumaMaskFloor;
+    float LumaMaskRadius;
 };
 
 class DlssNr_Common

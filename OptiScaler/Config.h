@@ -410,6 +410,25 @@ class Config
     // pass is bit-identical to before it existed, which is the default -- nobody's picture changes
     // unless they ask for it.
     CustomOptional<float> DlssNrChromaGuard { 0.0f };
+
+    // The luminance mask. How much of the model's edit survives, as a function of how much light the
+    // frame has where it lands.
+    //
+    // Measured against a 5760x3240 reference render of the same frozen frame: binned by block
+    // brightness, the fraction of the reference's own fine detail each picture carries went
+    // 0.454 -> 0.464 in the darkest quarter and 0.777 -> 0.889 in the brightest, monotone across ten
+    // bins, while the structure the model invents stayed flat across brightness. In shadow the edit
+    // is invention with no recovery behind it.
+    //
+    // Mode 0 is off and the pass is bit-identical. Low/High are display-referred luminance, the space
+    // the thresholds were measured in. Floor is how much of the edit survives in the deepest shadow --
+    // zero removes the model there entirely, which is the measurement's own answer but not
+    // necessarily the prettiest one, so it is a control and not a constant.
+    CustomOptional<uint32_t> DlssNrLumaMaskMode { 0 };
+    CustomOptional<float> DlssNrLumaMaskLow { 0.20f };
+    CustomOptional<float> DlssNrLumaMaskHigh { 0.40f };
+    CustomOptional<float> DlssNrLumaMaskFloor { 0.40f };
+    CustomOptional<float> DlssNrLumaMaskRadius { 24.0f };
     // Detail-only modes: also lock the low-frequency luminance BETWEEN passes, so pass N+1 is shown a
     // frame without pass N's glow and the halo does not compound with the pass count.
     CustomOptional<bool> DlssNrEdgeBetweenPasses { true };
