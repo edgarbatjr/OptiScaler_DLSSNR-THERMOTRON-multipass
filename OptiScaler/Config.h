@@ -420,13 +420,15 @@ class Config
     // bins, while the structure the model invents stayed flat across brightness. In shadow the edit
     // is invention with no recovery behind it.
     //
-    // Mode 0 is off and the pass is bit-identical. Low/High are display-referred luminance, the space
-    // the thresholds were measured in. Floor is how much of the edit survives in the deepest shadow --
+    // Mode 0 is off and the pass is bit-identical. Low/High are in STOPS below paper white: the first
+    // version used a display-referred 0..1 value and the game squeezed the whole scene into the band
+    // 0.24..0.45, which is not a range anyone can aim a slider at. Floor is how much of the edit
+    // survives in the deepest shadow --
     // zero removes the model there entirely, which is the measurement's own answer but not
     // necessarily the prettiest one, so it is a control and not a constant.
     CustomOptional<uint32_t> DlssNrLumaMaskMode { 0 };
-    CustomOptional<float> DlssNrLumaMaskLow { 0.20f };
-    CustomOptional<float> DlssNrLumaMaskHigh { 0.40f };
+    CustomOptional<float> DlssNrLumaMaskLow { -4.0f };
+    CustomOptional<float> DlssNrLumaMaskHigh { -2.8f };
     CustomOptional<float> DlssNrLumaMaskFloor { 0.40f };
     CustomOptional<float> DlssNrLumaMaskRadius { 24.0f };
     // Detail-only modes: also lock the low-frequency luminance BETWEEN passes, so pass N+1 is shown a

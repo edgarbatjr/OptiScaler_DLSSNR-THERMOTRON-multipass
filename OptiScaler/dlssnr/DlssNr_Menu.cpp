@@ -1030,24 +1030,35 @@ void RenderMenu(Config* config, float menuResScale)
                        "\n\nMonotone across ten bins, and normalised by each block's own true detail --"
                        "\nso it is not the trivial 'bright things have more detail'. The structure the"
                        "\nmodel INVENTS is flat across brightness. In shadow the edit is invention with"
-                       "\nno recovery behind it.");
+                       "\nno recovery behind it."
+                       "\n\nThe measurement was made on the finished frame; the mask reads the light"
+                       "\nbefore the game's tonemapper. Those are not the same ruler, so the two"
+                       "\nthresholds below are set by looking at the mask, not carried over as numbers.");
 
             if (lumaMask != 0)
             {
                 float maskLow = config->DlssNrLumaMaskLow.value_or_default();
-                if (ImGui::SliderFloat("Shadow ends at", &maskLow, 0.0f, 0.6f, "%.2f"))
+                if (ImGui::SliderFloat("Shadow ends at", &maskLow, -10.0f, 0.0f, "%.2f stops"))
                     config->DlssNrLumaMaskLow = maskLow;
 
-                HelpMarker("Display luminance at or below which the hold is fullest. The measured"
-                           "\ndarkest quarter of the frame ended around 0.25.");
+                HelpMarker("How dark a place has to be for the hold to be at its fullest, in STOPS below"
+                           "\npaper white. Zero is paper white and each step down is a halving of the"
+                           "\nlight, so the numbers are negative."
+                           "\n\nStops rather than a 0..1 brightness because the first version used the"
+                           "\nlatter and it could not be aimed: dividing by paper white and encoding"
+                           "\nsqueezed a scene spanning a factor of five in light into the band"
+                           "\n0.24 to 0.45. Two thirds of the slider did nothing. The same scene spans"
+                           "\nabout two units here.");
 
                 float maskHigh = config->DlssNrLumaMaskHigh.value_or_default();
-                if (ImGui::SliderFloat("Full light at", &maskHigh, 0.05f, 1.0f, "%.2f"))
+                if (ImGui::SliderFloat("Full light at", &maskHigh, -10.0f, 0.0f, "%.2f stops"))
                     config->DlssNrLumaMaskHigh = maskHigh;
 
-                HelpMarker("Display luminance at or above which the edit lands whole. Between the two"
-                           "\nthresholds the hold eases in smoothly, so it leaves no contour of its own"
-                           "\nacross a wall where the light crosses the line.");
+                HelpMarker("How bright a place has to be for the edit to land whole, in stops below paper"
+                           "\nwhite. Between the two thresholds the hold eases in smoothly, so it leaves"
+                           "\nno contour of its own across a wall where the light crosses the line."
+                           "\n\nSet these by looking at the mask, not at the picture: Debug view ->"
+                           "\nLuminance mask. Lit surfaces white, deep shadow black.");
 
                 float maskFloor = config->DlssNrLumaMaskFloor.value_or_default();
                 if (ImGui::SliderFloat("Left in shadow", &maskFloor, 0.0f, 1.0f, "%.2f"))
@@ -1072,8 +1083,8 @@ void RenderMenu(Config* config, float menuResScale)
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Reset##lumamask"))
                 {
-                    config->DlssNrLumaMaskLow = 0.20f;
-                    config->DlssNrLumaMaskHigh = 0.40f;
+                    config->DlssNrLumaMaskLow = -4.0f;
+                    config->DlssNrLumaMaskHigh = -2.8f;
                     config->DlssNrLumaMaskFloor = 0.40f;
                     config->DlssNrLumaMaskRadius = 24.0f;
                 }

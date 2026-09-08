@@ -36,8 +36,8 @@ cbuffer Params : register(b0)
     uint  gDepthInverted;  // 1 when the game's depth is reversed (near = 1)
     float gChromaGuard;    // how far the chroma may travel from the frame's, as a ratio; <1 = off
     uint  gLumaMaskMode;   // 0 off, 1 hold the edit back where the frame is dark
-    float gLumaMaskLow;    // display luminance at or below which the hold is fullest
-    float gLumaMaskHigh;   // display luminance at or above which the edit lands whole
+    float gLumaMaskLow;    // stops below paper white at or under which the hold is fullest
+    float gLumaMaskHigh;   // stops below paper white at or over which the edit lands whole
     float gLumaMaskFloor;  // how much of the edit survives in the deepest shadow, 0..1
     float gLumaMaskRadius; // radius of the local mean, in pixels of this dispatch
 };
@@ -1373,10 +1373,19 @@ void CSMain(uint3 id : SV_DispatchThreadID)
             }
         }
 
-        // Display-referred, because that is the space the thresholds above were measured in.
-        const float maskLuma = LinearToSrgb(float3(maskSum / max(maskWeight, 1e-4), 0.0, 0.0)).x;
-        const float maskLo = min(gLumaMaskLow, gLumaMaskHigh - 1e-4);
-        const float maskT = saturate((maskLuma - maskLo) / max(gLumaMaskHigh - maskLo, 1e-4));
+        // In stops below paper white, not in a 0..1 display value.
+        //
+        // The first version measured the brightness as a display-referred 0..1 number, and in the game
+        // it turned out to be useless: dividing by paper white and then encoding squeezed a scene that
+        // spans a factor of five in light into the band 0.24..0.45. Two thirds of the slider did
+        // nothing and the useful part was too narrow to aim at. Light does not live on a linear axis;
+        // stops are the axis it does live on, and they spread the same scene across about two units.
+        //
+        // Zero is paper white, so the numbers are negative and a step of one is a halving.
+        const float maskLin = maskSum / max(maskWeight, 1e-4);
+        const float maskStops = log2(max(maskLin, 1e-6));
+        const float maskLo = min(gLumaMaskLow, gLumaMaskHigh - 1e-3);
+        const float maskT = saturate((maskStops - maskLo) / max(gLumaMaskHigh - maskLo, 1e-3));
 
         // Smoothstepped so the hold has no visible contour of its own. A linear ramp puts a straight
         // edge across a wall wherever the light crosses the threshold, and the eye finds it.
