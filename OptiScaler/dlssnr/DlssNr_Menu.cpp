@@ -1166,6 +1166,42 @@ void RenderMenu(Config* config, float menuResScale)
 
         HelpMarker("Lets the model find skin itself rather than treating the frame uniformly.");
 
+        ImGui::SeparatorText("Control mask (bench)");
+
+        ImGui::TextDisabled("The model's own per-pixel control. Reading the dll turned up a compiled\n"
+                            "`control_mask` variant of its final block, next to the `simple_blend`\n"
+                            "one it normally runs, and a weight tensor trained for it. So the path is\n"
+                            "real. What selects it is the open question -- these two switches are the\n"
+                            "two candidates. A mask of all zero means \"do nothing anywhere\": if it\n"
+                            "bites, the model stops.");
+
+        static const char* nrMaskNames[] = { "Off", "Half zero / half one", "All zero", "All one" };
+        int maskTest = (int) config->DlssNrMaskTest.value_or_default();
+
+        if (maskTest > 3)
+            maskTest = 3;
+
+        if (ImGui::Combo("Control mask", &maskTest, nrMaskNames, IM_ARRAYSIZE(nrMaskNames)))
+            config->DlssNrMaskTest = (uint32_t) maskTest;
+
+        HelpMarker("Off clears the parameter entirely -- the model keeps a pointer to it, so a stale\n"
+                       "one would point at freed memory.\n\n"
+                       "Half and half is the reading test: a model that obeys leaves a seam down the\n"
+                       "middle. All zero and all one are the two poles, in case the sense is inverted.");
+
+        static const char* nrMaskFmtNames[] = { "R8_UNORM", "R16_FLOAT", "R32_FLOAT" };
+        int maskFmt = (int) config->DlssNrMaskFormat.value_or_default();
+
+        if (maskFmt > 2)
+            maskFmt = 2;
+
+        if (ImGui::Combo("Mask format", &maskFmt, nrMaskFmtNames, IM_ARRAYSIZE(nrMaskFmtNames)))
+            config->DlssNrMaskFormat = (uint32_t) maskFmt;
+
+        HelpMarker("R8_UNORM was the only format tried when this was written off as inert, and it is\n"
+                       "the obvious shape for a 0..1 mask -- which is exactly why it is worth doubting.\n"
+                       "Changing this rebuilds the texture; the log line says which format went over.");
+
         ImGui::SeparatorText("Colour");
 
         ImGui::TextDisabled("The model was trained on finished, sRGB-encoded frames. The upscaler's\n"

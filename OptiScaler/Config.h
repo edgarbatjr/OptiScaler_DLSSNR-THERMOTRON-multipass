@@ -364,6 +364,16 @@ class Config
     // masking NVIDIA describes -- and nothing here has ever written it.
     CustomOptional<uint32_t> DlssNrMaskTest { 0 };
 
+    // The format the control mask is handed over in. 0 R8_UNORM, 1 R16_FLOAT, 2 R32_FLOAT.
+    //
+    // R8_UNORM is the shape a per-pixel 0..1 mask usually takes and was the only thing tried when the
+    // mask was declared inert. The dll turned out to carry a compiled `control_mask` variant of its
+    // final fused block, next to the `simple_blend` one it normally runs, plus a weight tensor named
+    // for it -- so the path exists and the question is what selects it. Format is one of the two
+    // candidates; the model preset is the other. This switch exists so a session can test both
+    // without a second build.
+    CustomOptional<uint32_t> DlssNrMaskFormat { 0 };
+
     // How much of the model's edit reaches the frame. Separated because detail synthesis is a luminance
     // edit and any colour shift is usually the part you do not want, and allowed past 1.0 because
     // exaggerating an edit is the only honest way to see whether there is one.

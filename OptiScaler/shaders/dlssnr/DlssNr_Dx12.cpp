@@ -245,6 +245,9 @@ struct NrState
     // outlives the feature and a stale resource pointer left in it is a pointer to freed memory.
     ID3D12Resource* maskTex = nullptr;
 
+    // What maskTex was built with, so a format change parks the old one instead of lying about it.
+    DXGI_FORMAT maskFormat = DXGI_FORMAT_UNKNOWN;
+
     // Mixed-resolution passes. Pass 1 runs at the working size into `output`. Each later pass i
     // may run at its own fraction of it: it is shown the current full-size picture shrunk
     // (mixIn[i]), answers at that size (mixOut[i]), and what it added -- the difference of the two
@@ -1975,11 +1978,33 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     if (g_nr.proxyKeep == nullptr)
         g_nr.proxyKeep = CreateScratch(device, desc.Format, workWidth, workHeight);
 
-    // R8_UNORM, which is the shape a per-pixel 0..1 mask usually takes. If the model refuses it the
-    // evaluate says so in the log and the next thing to try is a float format; nothing here guesses
-    // twice in silence.
-    if (cfg.DlssNrMaskTest.value_or_default() > 0 && g_nr.maskTex == nullptr)
-        g_nr.maskTex = CreateScratch(device, DXGI_FORMAT_R8_UNORM, workWidth, workHeight);
+    // The control mask, in whichever format the menu asks for. R8_UNORM is the shape a per-pixel 0..1
+    // mask usually takes and is the only one that was ever tried when this was declared inert -- but
+    // the dll carries a compiled `control_mask` variant of its final block beside the `simple_blend`
+    // one, so the path is real and something selects it. Format is one candidate, model preset the
+    // other. Changing the format parks the old texture rather than reinterpreting it.
+    {
+        const unsigned int maskWanted = cfg.DlssNrMaskTest.value_or_default();
+        const unsigned int fmtWanted = cfg.DlssNrMaskFormat.value_or_default();
+        const DXGI_FORMAT maskFmt = fmtWanted == 1   ? DXGI_FORMAT_R16_FLOAT
+                                    : fmtWanted == 2 ? DXGI_FORMAT_R32_FLOAT
+                                                     : DXGI_FORMAT_R8_UNORM;
+
+        if (g_nr.maskTex != nullptr && (maskWanted == 0 || g_nr.maskFormat != maskFmt))
+        {
+            if (g_nr.capabilityParams != nullptr)
+                g_nr.capabilityParams->Set("DLSSNR.ControlMask", (unsigned long long) 0);
+
+            ParkNrResource(g_nr.maskTex);
+            g_nr.maskFormat = DXGI_FORMAT_UNKNOWN;
+        }
+
+        if (maskWanted > 0 && g_nr.maskTex == nullptr)
+        {
+            g_nr.maskTex = CreateScratch(device, maskFmt, workWidth, workHeight);
+            g_nr.maskFormat = g_nr.maskTex != nullptr ? maskFmt : DXGI_FORMAT_UNKNOWN;
+        }
+    }
 
     if (mixed)
     {
@@ -2790,14 +2815,22 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         g_nr.capabilityParams->Set("DLSSNR.ControlMaskSubrectHeight", (unsigned int) workHeight);
 
         static unsigned int maskSaid = 0;
-        if (maskSaid != maskTest)
+        const unsigned int maskStamp = maskTest | (cfg.DlssNrMaskFormat.value_or_default() << 4) |
+                                       (cfg.DlssNrPreset.value_or_default() << 8) |
+                                       (cfg.DlssNrStyle.value_or_default() << 12);
+        if (maskSaid != maskStamp)
         {
-            maskSaid = maskTest;
-            LOG_INFO("DLSS-NR MASKTEST {}: control mask {}x{} R8_UNORM handed to the model ({})",
+            maskSaid = maskStamp;
+            LOG_INFO("DLSS-NR MASKTEST {}: control mask {}x{} {} handed to the model ({}), preset {}, "
+                     "style {}",
                      maskTest, workWidth, workHeight,
+                     g_nr.maskFormat == DXGI_FORMAT_R16_FLOAT   ? "R16_FLOAT"
+                     : g_nr.maskFormat == DXGI_FORMAT_R32_FLOAT ? "R32_FLOAT"
+                                                                : "R8_UNORM",
                      maskTest == 1   ? "left half zero, right half one"
                      : maskTest == 2 ? "all zero"
-                                     : "all one");
+                                     : "all one",
+                     cfg.DlssNrPreset.value_or_default(), cfg.DlssNrStyle.value_or_default());
         }
     }
     else
