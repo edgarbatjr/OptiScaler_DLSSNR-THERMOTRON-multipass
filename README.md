@@ -196,6 +196,42 @@ strength. Both polarities tested, so it is not inverted — it is unread.
 
 The `MaskTest` key that painted those masks is a diagnostic and is not in the release build.
 
+**Reopened, and closed again with better evidence.** Pulling every ASCII string out of NVIDIA's
+`nvngx_dlssnr.dll` (310.8.0.0, 165,840,496 bytes) turned up compiled CUDA kernels named for the
+thing, sitting beside the ones the model normally runs:
+
+```
+cc_tinlayout_fused_post_block_swin_1h_32_simple_blend
+cc_tinlayout_fused_post_block_swin_1h_32_control_mask
+```
+
+— plus the fp8 and full_rect variants of each, and a weight tensor named
+`CC_Control_History_Blend_Quantize_With_Teacher_honest_tench_2026_07_04_22_30_weights`. So the path
+is real, was trained deliberately, and is compiled in. That is a good reason to doubt a verdict
+reached with one texture format at one model preset.
+
+Twelve more prints said the same thing, on a much better bench: the frame frozen, the base taken by
+un-checking *Apply the model* so it is the same pixels without the edit, and twenty seconds of
+settling after every change. Eight prints across four model presets × mask off / all zero in
+R8_UNORM, then R16_FLOAT and R32_FLOAT. **Every one of them landed between 1029 and 1038** — a spread
+of 0.9%, with a pairwise difference of 0.68–0.88, which is this measurement's noise floor.
+
+Neither the texture format nor the model preset selects it. The kernel exists and nothing an injector
+can write reaches it.
+
+### The four model presets are the same model
+
+While the bench was up: `DLSSNR.Hint.Render.Preset` at Default, 1, 2 and 3 produced the same picture
+within noise, at the same cost (6.99–7.16 ms). NVIDIA has said the models it ships have no
+performance difference between them; here they have no visible difference either.
+
+A caution worth publishing with it, because it cost us an hour: taken five seconds apart, the same
+four presets appeared to differ, and preset 3 looked like a clearly better model. It was not. Both
+bursts climbed from ~1031 to ~1110 in the same order regardless of which preset was selected —
+changing the preset rebuilds the feature, changing the mask resets the temporal history (the DLL
+carries `CG2R_ResetTemporalHistoryOnControlChange`), and a frame caught mid-settle measures the
+transient. **Wait for the picture to stop moving before the shutter.**
+
 ## What the passes must not share
 
 One history was the finding that closed the gap. It also introduced one of our own.
@@ -440,6 +476,29 @@ The area term is real; there is a second term for the frame around it that we ha
 frame you can go to 67% and barely see it. In motion, faces and small objects start to shimmer: the
 game jitters its camera every frame, and a reduced raster lands on a different phase each time.
 79–80% was where it stopped, measured by eye on a 5090 in one game. Test yours.
+
+**Model resolution above 100% costs more and delivers less.** The slider goes to 200% and the guess
+was that a finer raster gives the model more structure to work with. Measured against a frozen frame
+with a pixel-identical base, at `after` on a native 4K output:
+
+| model resolution | the model's raster | ms | texture gained | texture per unit of grain |
+|---|---|---|---|---|
+| **100%** | 3840×2160 | 6.99 | **+125.8** | **0.48** |
+| 145% | 5568×3132 | 15.06 | +43.5 | 0.26 |
+| 175% | 6720×3780 | 22.31 | +41.6 | 0.29 |
+| 200% | 7680×4320 | 29.92 | **+28.0** | 0.23 |
+
+At 200% it costs 4.3× and returns 22% of the gain, and the ratio of texture to grain gets worse as
+well — it is not less of the same, it is worse distributed. The mechanism is the trip home: the model
+writes detail at 7680×4320 and Lanczos3 samples it back to 3840×2160, which destroys exactly the fine
+structure it just added. It is drawing above the frequency the output can carry.
+
+Cost itself is honest — it tracks area almost exactly (11.83/15.08/22.33/29.95 measured against
+11.97/14.90/21.66/28.32 predicted). You are simply paying it for nothing.
+
+**This says nothing about supersampling up to native.** At `before`, where the model runs on the
+game's render resolution, 145% of a 2558×1439 render is 3709×2087 — just under a 4K output, not above
+it. That is a different question and it is untested here.
 
 **The aggregate hid the shape.** For three days this file said both mods *wash shadows* — the
 darkest 15% of the frame goes from about 10 to about 30, so it looked like a black-level lift. It is
