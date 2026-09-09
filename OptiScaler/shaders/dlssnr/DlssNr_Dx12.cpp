@@ -3347,7 +3347,14 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         // The detail-only modes need the low-frequency luminance of both pictures first: one small
         // dispatch that box-averages 16x16 blocks of the proxy and of the answer into a two-channel
         // map. Skipped entirely when no such mode is on, so the shipped path is untouched.
-        const bool wantLowFreq = resolveParams.EdgeGuardMode >= 4 && g_nr.lowFreq != nullptr;
+        //
+        // The luminance mask wants the same map, for a different reason: it needs to know how much
+        // light there is AROUND a pixel, and sampling that with a handful of taps on the full-size
+        // frame is an undersampled mean -- it drew the hatch of the log wall into the mask, which is
+        // the mask following the texture instead of the light. This map is a real block average, read
+        // back bilinearly, so there is no lattice to beat against the scene's own lines.
+        const bool wantLowFreq =
+            (resolveParams.EdgeGuardMode >= 4 || resolveParams.LumaMaskMode != 0) && g_nr.lowFreq != nullptr;
 
         if (wantLowFreq)
         {

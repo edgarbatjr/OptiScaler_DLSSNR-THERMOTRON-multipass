@@ -1330,47 +1330,34 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     // composition's own strengths. Mode 0 does not run, and the pass stays bit-identical.
     if (gLumaMaskMode != 0)
     {
-        // A local mean, not this pixel's own luminance. The measurement was made on blocks, and a
-        // per-pixel gate would follow the texture rather than the light: every dark speck inside a
-        // lit surface would lose the model, which is a sharpening artefact, not a mask.
-        // Two rings and a centre rather than a 3x3 grid.
+        // The block map, not loose samples across the whole frame.
         //
-        // The grid was the first version and it was wrong in a way that showed: nine point samples on
-        // an axis-aligned lattice, spaced a couple of dozen pixels apart, is a badly undersampled
-        // mean. It moves in steps as the lattice crosses a feature, so the mask picked up a
-        // cross-hatch of the log rows and the straw -- it followed the TEXTURE, which is the one thing
-        // a lighting mask must not do, and it would have printed that hatch onto the picture.
+        // The first two versions measured the surrounding light with 9 and then 17 point samples on
+        // the full-size picture. Both were wrong the same way: a mean taken like that is
+        // undersampled, it moves in steps as the sample pattern crosses a feature, and what came out
+        // was the hatch of the log wall drawn into the mask itself -- the mask following the TEXTURE,
+        // which is the one thing a lighting mask must never do. The debug view showed it plainly,
+        // which is what the debug view is for.
         //
-        // Sixteen taps on two rings, the outer one turned half a step against the inner, is isotropic:
-        // no axis is privileged, so there is no lattice to beat against the scene's own lines.
-        const float2 maskUnit = float2(1.0 / max((float) gWidth, 1.0), 1.0 / max((float) gHeight, 1.0)) *
-                                max(gLumaMaskRadius, 1.0);
-        float maskSum = 0.0;
-        float maskWeight = 0.0;
+        // gLowFreq is already the 16x16 block mean of the proxy (channel R), read back bilinearly.
+        // That is a real average: there is no lattice left to beat against the scene's own lines, and
+        // it costs one sample instead of seventeen. The radius now spreads over THAT map, where
+        // sampling is cheap and there is no aliasing left to raise.
+        //
+        // The C++ side dispatches this map whenever the mask is on -- before, it only existed for the
+        // detail-only edge guard.
+        uint lfW, lfH;
+        gLowFreq.GetDimensions(lfW, lfH);
+        const float2 lfStep = float2(1.0 / max((float) lfW, 1.0), 1.0 / max((float) lfH, 1.0)) *
+                              max(gLumaMaskRadius, 1.0) / 16.0;
+        float maskSum = 2.0 * gLowFreq.SampleLevel(gLinear, cmpUv, 0).r;
+        float maskWeight = 2.0;
 
+        [unroll] for (int mk = 0; mk < 8; ++mk)
         {
-            const float3 c = gOriginal.SampleLevel(gLinear, cmpUv, 0).rgb / normScale;
-            maskSum += 2.0 * dot(max(c, 0.0), kLuma);
-            maskWeight += 2.0;
-        }
-
-        [unroll] for (int ring = 0; ring < 2; ++ring)
-        {
-            // Inner ring at half the radius and weighted twice as heavily: the estimate should lean on
-            // the light near the pixel and only be steadied by the light further out.
-            const float rad = ring == 0 ? 0.5 : 1.0;
-            const float w = ring == 0 ? 2.0 : 1.0;
-            const float turn = ring == 0 ? 0.0 : 0.3927; // half a step of eight, in radians
-
-            [unroll] for (int i = 0; i < 8; ++i)
-            {
-                const float a = 0.7854 * (float) i + turn;
-                const float3 tap =
-                    gOriginal.SampleLevel(gLinear, cmpUv + float2(cos(a), sin(a)) * rad * maskUnit, 0).rgb /
-                    normScale;
-                maskSum += w * dot(max(tap, 0.0), kLuma);
-                maskWeight += w;
-            }
+            const float ang = 0.7854 * (float) mk;
+            maskSum += gLowFreq.SampleLevel(gLinear, cmpUv + float2(cos(ang), sin(ang)) * lfStep, 0).r;
+            maskWeight += 1.0;
         }
 
         // In stops below paper white, not in a 0..1 display value.

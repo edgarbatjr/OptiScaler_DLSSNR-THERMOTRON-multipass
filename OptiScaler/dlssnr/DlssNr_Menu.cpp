@@ -1075,10 +1075,12 @@ void RenderMenu(Config* config, float menuResScale)
                 if (ImGui::SliderFloat("Mask radius (px)", &maskRadius, 1.0f, 96.0f, "%.0f"))
                     config->DlssNrLumaMaskRadius = maskRadius;
 
-                HelpMarker("How wide the local average of the light is, in pixels. The measurement was"
-                           "\nmade on blocks of about 130 pixels; the mask is deliberately tighter so"
-                           "\nit follows the lighting rather than the frame. Too small and it starts"
-                           "\nfollowing the texture instead, which is a sharpening artefact.");
+                HelpMarker("How wide the local average of the light is, in pixels of the frame."
+                           "\n\nThe average itself comes from the 16x16 block map the pass already"
+                           "\nbuilds, read back bilinearly, and the radius spreads the samples over"
+                           "\nTHAT map. The first versions sampled the full-size frame directly and"
+                           "\ndrew the hatch of a log wall into the mask -- the mask following the"
+                           "\ntexture instead of the light, which is exactly what it must not do.");
 
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Reset##lumamask"))
