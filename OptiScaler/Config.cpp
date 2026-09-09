@@ -320,6 +320,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrToggleKey.set_from_config(readInt("DlssNr", "ToggleKey"));
             DlssNrHoldFrameKey.set_from_config(readInt("DlssNr", "HoldFrameKey"));
             DlssNrApplyModelKey.set_from_config(readInt("DlssNr", "ApplyModelKey"));
+            DlssNrReloadTuningKey.set_from_config(readInt("DlssNr", "ReloadTuningKey"));
             DlssNrTransferStrength.set_from_config(readFloat("DlssNr", "TransferStrength"));
             DlssNrColourStrength.set_from_config(readFloat("DlssNr", "ColourStrength"));
             DlssNrMaxRatio.set_from_config(readFloat("DlssNr", "MaxRatio"));
@@ -886,6 +887,90 @@ bool Config::Reload(std::filesystem::path iniPath)
     return false;
 }
 
+bool Config::ReloadDlssNrTuning()
+{
+    // The other half of Hold frame.
+    //
+    // Freezing the picture the model receives only pays off if the setting under test can move
+    // while it stays frozen. Otherwise a sweep of one threshold is five different frames, and the
+    // scene's own drift -- the sun walking, the grass moving, the character breathing -- is larger
+    // than the thing being swept. That is not a hypothetical: two runs of an identical condition
+    // once landed 0.011 apart while the effect being measured was 0.016.
+    //
+    // So: re-read the ini and apply only the values that reach the shader as constants. Everything
+    // that would rebuild the feature or reallocate a resource is deliberately absent -- Enabled,
+    // Preset, Passes, Placement, WorkingScale, the mask formats and the scan/exposure plumbing.
+    // Rebuilding is exactly what the freeze exists to avoid, so a reload that rebuilt would defeat
+    // its own purpose. Change one of those and restart; that is the honest cost of changing it.
+    if (ini.LoadFile(absoluteFileName.c_str()) != SI_OK)
+        return false;
+
+    // Plain assignment, not set_from_config. set_from_config only writes when the slot is still
+    // empty -- it is the first-load path -- so calling it here does nothing at all, silently. That
+    // cost a whole sweep: seven captures came back identical to four decimal places and read as
+    // "the mask does nothing", when what actually happened was that not one of the seven values
+    // ever reached the shader. Assignment is also the right meaning for a reload: the file is the
+    // truth, and a key that is absent or "auto" goes back to its default, exactly as at startup.
+
+    // Strength and transfer
+    DlssNrTransferStrength = readFloat("DlssNr", "TransferStrength");
+    DlssNrColourStrength = readFloat("DlssNr", "ColourStrength");
+    DlssNrMaxRatio = readFloat("DlssNr", "MaxRatio");
+    DlssNrTransfer = readUInt("DlssNr", "Transfer");
+
+    // Look
+    DlssNrIntensity = readFloat("DlssNr", "Intensity");
+    DlssNrStyle = readUInt("DlssNr", "Style");
+    DlssNrLocalStructure = readFloat("DlssNr", "LocalStructure");
+    DlssNrLocalTone = readFloat("DlssNr", "LocalTone");
+    DlssNrSkinStructure = readFloat("DlssNr", "SkinStructure");
+
+    // Guards
+    DlssNrEdgeGuardMode = readUInt("DlssNr", "EdgeGuardMode");
+    DlssNrEdgeGuard = readFloat("DlssNr", "EdgeGuard");
+    DlssNrEdgeThreshold = readFloat("DlssNr", "EdgeThreshold");
+    DlssNrEdgeRadius = readFloat("DlssNr", "EdgeRadius");
+    DlssNrChromaGuard = readFloat("DlssNr", "ChromaGuard");
+
+    // The luminance mask
+    DlssNrLumaMaskMode = readUInt("DlssNr", "LumaMaskMode");
+    DlssNrLumaMaskLow = readFloat("DlssNr", "LumaMaskLow");
+    DlssNrLumaMaskHigh = readFloat("DlssNr", "LumaMaskHigh");
+    DlssNrLumaMaskFloor = readFloat("DlssNr", "LumaMaskFloor");
+    DlssNrLumaMaskRadius = readFloat("DlssNr", "LumaMaskRadius");
+
+    // Per-pass weights
+    DlssNrPassDecay2 = readFloat("DlssNr", "PassDecay2");
+    DlssNrPassDecay3 = readFloat("DlssNr", "PassDecay3");
+    DlssNrPassDecay4 = readFloat("DlssNr", "PassDecay4");
+    DlssNrPassScale2 = readFloat("DlssNr", "PassScale2");
+    DlssNrPassScale3 = readFloat("DlssNr", "PassScale3");
+    DlssNrPassScale4 = readFloat("DlssNr", "PassScale4");
+
+    // White point trims -- scalars into the same compose, no rebuild
+    DlssNrWhitePointTrim = readFloat("DlssNr", "WhitePointTrim");
+    DlssNrWhitePointScale = readFloat("DlssNr", "WhitePointScale");
+
+    // What is being looked at
+    DlssNrDebugView = readUInt("DlssNr", "DebugView");
+    DlssNrCompare = readUInt("DlssNr", "Compare");
+    DlssNrCompareSplit = readFloat("DlssNr", "CompareSplit");
+    DlssNrCompareZoom = readFloat("DlssNr", "CompareZoom");
+    DlssNrCompareSwap = readBool("DlssNr", "CompareSwap");
+    DlssNrCompareTags = readBool("DlssNr", "CompareTags");
+    DlssNrTagScale = readFloat("DlssNr", "TagScale");
+
+    // Hold frame and Apply the model are absent on purpose, even though both are pure constants.
+    // They belong to the keys, not to the file: reloading while frozen would read HoldFrame=false
+    // out of the ini and release the very freeze the reload was called under, and ApplyModel=true
+    // would quietly put the edit back mid-capture. A bench control that undoes itself is worse
+    // than no control at all.
+
+    LOG_INFO("DlssNr tuning reloaded from the ini");
+
+    return true;
+}
+
 bool Config::LoadFromPath(const wchar_t* InPath)
 {
     std::filesystem::path iniPath(InPath);
@@ -1235,6 +1320,9 @@ bool Config::SaveIni()
 
         auto applyKey = Instance()->DlssNrApplyModelKey.value_for_config();
         ini.SetValue("DlssNr", "ApplyModelKey", GetIntValue(applyKey, applyKey > 0).c_str());
+
+        auto reloadKey = Instance()->DlssNrReloadTuningKey.value_for_config();
+        ini.SetValue("DlssNr", "ReloadTuningKey", GetIntValue(reloadKey, reloadKey > 0).c_str());
     }
     ini.SetValue("DlssNr", "TransferStrength",
                  GetFloatValue(Instance()->DlssNrTransferStrength.value_for_config()).c_str());

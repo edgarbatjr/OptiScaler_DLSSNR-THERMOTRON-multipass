@@ -163,6 +163,7 @@ static int lastKey = 0;
 static bool inputDlssNr = false;
 static bool inputDlssNrHold = false;
 static bool inputDlssNrApply = false;
+static bool inputDlssNrReloadTuning = false;
 static bool capturingKey = false;
 
 template <typename T, size_t N> struct RingBuffer
@@ -286,6 +287,8 @@ void MenuCommon::UpdateManualInput(HWND targetHwnd)
                       "Hold frame key pressed, will be freezing or releasing the frame");
         CheckShortcut(config->DlssNrApplyModelKey.value_or_default(), inputDlssNrApply,
                       "Apply the model key pressed, will be showing or hiding the edit");
+        CheckShortcut(config->DlssNrReloadTuningKey.value_or_default(), inputDlssNrReloadTuning,
+                      "Reload tuning key pressed, will be re-reading the DlssNr numbers from the ini");
     }
     else if (capturingKey)
     {
@@ -1361,6 +1364,23 @@ void MenuCommon::HandleMenuShortcuts(RenderMenuContext& ctx)
             ImGuiToast toast { ImGuiToastType::Info, 2000 };
             toast.setTitle("Apply the model");
             toast.setContent(config->DlssNrApplyModel.value_or_default() ? "On" : "Off (the pass still runs)");
+            ImGui::InsertNotification(toast);
+        }
+
+        // Reload tuning, on a key.
+        //
+        // With Hold frame this turns a sweep into one experiment instead of five: freeze, change
+        // the number in the ini, press this, capture -- same pixels every time, so the only thing
+        // that moved is the number. Only the shader's per-frame constants come back; see
+        // Config::ReloadDlssNrTuning for what is left out and why.
+        if (inputDlssNrReloadTuning)
+        {
+            inputDlssNrReloadTuning = false;
+            const bool ok = config->ReloadDlssNrTuning();
+
+            ImGuiToast toast { ok ? ImGuiToastType::Success : ImGuiToastType::Error, 2000 };
+            toast.setTitle("Reload tuning");
+            toast.setContent(ok ? "Read back from the ini" : "Could not read the ini");
             ImGui::InsertNotification(toast);
         }
 
@@ -7014,6 +7034,7 @@ void MenuCommon::RenderKeybindSettings(RenderMenuContext& ctx)
         static auto dlssNrToggle = Keybind("Neural Rendering", 14);
         static auto dlssNrHold = Keybind("Hold frame", 15);
         static auto dlssNrApply = Keybind("Apply the model", 16);
+        static auto dlssNrReload = Keybind("Reload tuning from the ini", 17);
 
         menu.Render(config->ShortcutKey);
         fpsOverlay.Render(config->FpsShortcutKey);
@@ -7022,6 +7043,7 @@ void MenuCommon::RenderKeybindSettings(RenderMenuContext& ctx)
         dlssNrToggle.Render(config->DlssNrToggleKey);
         dlssNrHold.Render(config->DlssNrHoldFrameKey);
         dlssNrApply.Render(config->DlssNrApplyModelKey);
+        dlssNrReload.Render(config->DlssNrReloadTuningKey);
     }
 }
 

@@ -273,6 +273,7 @@ class Config
     // A key does not move the camera.
     CustomOptional<int> DlssNrHoldFrameKey { UnboundKey };
     CustomOptional<int> DlssNrApplyModelKey { UnboundKey };
+    CustomOptional<int> DlssNrReloadTuningKey { UnboundKey };
     CustomOptional<uint32_t> DlssNrPreset { 0 };
     CustomOptional<float> DlssNrIntensity { 1.0f };
     // 0 default (standard), 1 natural, 2 cinematic -- the model's own processing profiles.
@@ -1109,6 +1110,11 @@ class Config
     bool LoadFromPath(const wchar_t* InPath);
     bool SaveIni();
     bool SaveXeFG();
+
+    // Re-read only the DlssNr numbers the compose shader consumes as constants each frame.
+    // Nothing here rebuilds the feature or reallocates a resource, so it is safe to call while a
+    // frame is held. See ReloadDlssNrTuning in Config.cpp for why the list stops where it stops.
+    bool ReloadDlssNrTuning();
 
     void CheckUpscalerFiles();
 
