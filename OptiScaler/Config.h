@@ -440,9 +440,24 @@ class Config
     // survives in the deepest shadow --
     // zero removes the model there entirely, which is the measurement's own answer but not
     // necessarily the prettiest one, so it is a control and not a constant.
+    //
+    // Low/High were first guessed, and the guess was wrong. Measured on a frozen frame -- seven
+    // windows on the same pixels, the mask read back per pixel as the surviving fraction of the
+    // edit -- the old -4.0/-2.8 pair left the mask at 0.01 in the darkest tenth of the frame and
+    // only 0.68 in the brightest: it never let the edit land whole anywhere, so what it really did
+    // was turn the model down by half everywhere. -4.6/-3.4 gives the shape the mask was designed
+    // for: 0.00 in the darkest tenth, 0.97 in the brightest, crossing halfway through the midtones.
+    // Aimed on one scene, in daylight; a scene whose exposure sits elsewhere will want it moved,
+    // which is an argument for aiming the window at the frame's own average rather than at an
+    // absolute number -- the same lesson this project keeps relearning, now about the mask itself.
+    //
+    // Radius is the block map's blur, in source pixels. 8, 16, 24 and 32 measure the same to two
+    // decimals; 48 and 64 flatten the mask visibly (the darkest tenth rises to 0.03 and the
+    // brightest falls to 0.89), because at that width a dark block borrows light from its lit
+    // neighbours and a lit one borrows shadow. 24 sits in the flat part of that curve.
     CustomOptional<uint32_t> DlssNrLumaMaskMode { 0 };
-    CustomOptional<float> DlssNrLumaMaskLow { -4.0f };
-    CustomOptional<float> DlssNrLumaMaskHigh { -2.8f };
+    CustomOptional<float> DlssNrLumaMaskLow { -4.6f };
+    CustomOptional<float> DlssNrLumaMaskHigh { -3.4f };
     CustomOptional<float> DlssNrLumaMaskFloor { 0.40f };
     CustomOptional<float> DlssNrLumaMaskRadius { 24.0f };
     // Detail-only modes: also lock the low-frequency luminance BETWEEN passes, so pass N+1 is shown a
