@@ -260,6 +260,19 @@ class Config
     // Toggles the pass in game. Unbound by default -- a key that does something unexpected is worse
     // than one that does nothing.
     CustomOptional<int> DlssNrToggleKey { UnboundKey };
+
+    // Two more keys, and they exist because of how this pass gets measured.
+    //
+    // The bench protocol is Hold frame + Apply the model: freeze the picture the model
+    // receives, then toggle the edit off to see the SAME pixels without it. That makes the
+    // base pixel-identical, which is what removes alignment from every comparison.
+    //
+    // Reaching those two through the menu costs the thing they were meant to protect. In a
+    // game with mouse-look, moving the cursor to a checkbox turns the camera -- measured at
+    // about 7 pixels, enough to make two captures disagree at the fine scales that matter.
+    // A key does not move the camera.
+    CustomOptional<int> DlssNrHoldFrameKey { UnboundKey };
+    CustomOptional<int> DlssNrApplyModelKey { UnboundKey };
     CustomOptional<uint32_t> DlssNrPreset { 0 };
     CustomOptional<float> DlssNrIntensity { 1.0f };
     // 0 default (standard), 1 natural, 2 cinematic -- the model's own processing profiles.

@@ -161,6 +161,8 @@ static float lastMenuScale = 0.0f;
 static CustomOptional<uint32_t> comboPreset { 0 };
 static int lastKey = 0;
 static bool inputDlssNr = false;
+static bool inputDlssNrHold = false;
+static bool inputDlssNrApply = false;
 static bool capturingKey = false;
 
 template <typename T, size_t N> struct RingBuffer
@@ -280,6 +282,10 @@ void MenuCommon::UpdateManualInput(HWND targetHwnd)
                       "Menu key pressed, will be switching FPS mode");
         CheckShortcut(config->DlssNrToggleKey.value_or_default(), inputDlssNr,
                       "Neural Rendering key pressed, will be toggling the pass");
+        CheckShortcut(config->DlssNrHoldFrameKey.value_or_default(), inputDlssNrHold,
+                      "Hold frame key pressed, will be freezing or releasing the frame");
+        CheckShortcut(config->DlssNrApplyModelKey.value_or_default(), inputDlssNrApply,
+                      "Apply the model key pressed, will be showing or hiding the edit");
     }
     else if (capturingKey)
     {
@@ -1327,6 +1333,34 @@ void MenuCommon::HandleMenuShortcuts(RenderMenuContext& ctx)
             ImGuiToast toast { ImGuiToastType::Info, 2000 };
             toast.setTitle("DLSS Neural Rendering");
             toast.setContent(config->DlssNrEnabled.value_or_default() ? "On" : "Off");
+            ImGui::InsertNotification(toast);
+        }
+
+        // Hold frame and Apply the model, on keys.
+        //
+        // These two are the bench protocol: freeze the picture the model receives, then toggle
+        // the edit off to see the same frozen pixels without it. Through the menu they cost what
+        // they were meant to protect -- in a game with mouse-look, moving the cursor to a
+        // checkbox turns the camera, and two captures of "the same frame" then disagree.
+        if (inputDlssNrHold)
+        {
+            inputDlssNrHold = false;
+            config->DlssNrHoldFrame = !config->DlssNrHoldFrame.value_or_default();
+
+            ImGuiToast toast { ImGuiToastType::Info, 2000 };
+            toast.setTitle("Hold frame");
+            toast.setContent(config->DlssNrHoldFrame.value_or_default() ? "Frozen" : "Released");
+            ImGui::InsertNotification(toast);
+        }
+
+        if (inputDlssNrApply)
+        {
+            inputDlssNrApply = false;
+            config->DlssNrApplyModel = !config->DlssNrApplyModel.value_or_default();
+
+            ImGuiToast toast { ImGuiToastType::Info, 2000 };
+            toast.setTitle("Apply the model");
+            toast.setContent(config->DlssNrApplyModel.value_or_default() ? "On" : "Off (the pass still runs)");
             ImGui::InsertNotification(toast);
         }
 
@@ -6978,12 +7012,16 @@ void MenuCommon::RenderKeybindSettings(RenderMenuContext& ctx)
         static auto fpsOverlayCycle = Keybind("FPS Overlay Cycle", 12);
         static auto fgEnable = Keybind("Frame Generation", 13);
         static auto dlssNrToggle = Keybind("Neural Rendering", 14);
+        static auto dlssNrHold = Keybind("Hold frame", 15);
+        static auto dlssNrApply = Keybind("Apply the model", 16);
 
         menu.Render(config->ShortcutKey);
         fpsOverlay.Render(config->FpsShortcutKey);
         fpsOverlayCycle.Render(config->FpsCycleShortcutKey);
         fgEnable.Render(config->FGShortcutKey);
         dlssNrToggle.Render(config->DlssNrToggleKey);
+        dlssNrHold.Render(config->DlssNrHoldFrameKey);
+        dlssNrApply.Render(config->DlssNrApplyModelKey);
     }
 }
 
