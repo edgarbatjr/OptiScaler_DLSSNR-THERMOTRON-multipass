@@ -423,6 +423,28 @@ class Config
     // structure is luminance and survives untouched. Below 1.0 the guard does not run at all and the
     // pass is bit-identical to before it existed, which is the default -- nobody's picture changes
     // unless they ask for it.
+    //
+    // Measured, on a frozen frame, and the number is much smaller than the guard was built for.
+    // The model has a warm bias in shadow: on a log wall in daylight, with the same wood lit and
+    // shaded on either side, the shadow's blue-to-red ratio sits at 0.84 of the lit surface's in
+    // the game's own frame. One pass of the model drags that to 0.76; three passes to 0.685. The
+    // drift compounds, because each pass bounds itself against the last pass's already-drifted
+    // colour, not against the frame the player would have seen.
+    //
+    // A guard of 1.01 -- one percent, not the doubling the skin case needed -- puts it back:
+    //
+    //     three passes      shadow/lit blue   vs the game's frame   fine detail kept
+    //     model alone            0.685              -18.7%               +54.2%
+    //     guard 1.01             0.852               +1.2%               +52.8%
+    //
+    // Two captures of one identical setting differ by 1.5 points on that detail figure, so the
+    // 54.2 and the 52.8 are the same number: the guard costs nothing measurable and removes the
+    // whole drift. It costs nothing in time either -- 74.8 against 74.5 fps at 4K, three passes.
+    //
+    // Why a photographic model warms shadows is not mysterious: outdoors a shadow is lit by the
+    // sky and reads cool, and a model trained to make frames look photographic has learned to
+    // put warmth back into a picture whose shadows it finds flat. In a game the shadow's colour
+    // is the engine's answer about what light reaches there, and it is not the model's to revise.
     CustomOptional<float> DlssNrChromaGuard { 0.0f };
 
     // The luminance mask. How much of the model's edit survives, as a function of how much light the
